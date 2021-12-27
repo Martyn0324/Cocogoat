@@ -1,2 +1,9 @@
 # Progressive-DCGAN
-Progressive DCGAN created based on many different codes. The only originality here is the DatasetCreator class.
+Progressive DCGAN created on Pytorch, based on many different codes. The only originality here is the DatasetCreator class.
+
+*OBS: If you read those papers and check the code, you'll notice that some resources are missing. The explanation for this is...simply because I don't know how to do it. That's specially the case for layer fading from NVidia's paper.*
+
+## References:
+**Pytorch's DCGAN Tutorial:** https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html
+**OpenAI's Improved Techniques for Training GANs:** https://arxiv.org/pdf/1606.03498.pdf
+**NVidia's PROGRESSIVE GROWING OF GANS FOR IMPROVED QUALITY, STABILITY, AND VARIATION:** https://arxiv.org/pdf/1710.10196.pdf
