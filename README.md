@@ -1,5 +1,7 @@
-# Progressive-DCGAN
-Progressive DCGAN created on Pytorch, based on many different codes. The only originality here is the DatasetCreator class.
+# Cocogoat - A Progressive DCGAN
+Progressive DCGAN created on Pytorch, based on many different codes. The only originality here is the name and the DatasetCreator class.
+
+The name it's because I've been testing this code initially using only images of Ganyu from Genshin Impact.
 
 *OBS: If you read those papers and check the code, you'll notice that some resources are missing. The explanation for this is...simply because I don't know how to do it. That's specially the case for layer fading from NVidia's paper.*
 
