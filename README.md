@@ -3,7 +3,7 @@ Progressive DCGAN created on Pytorch, based on many different codes. The only or
 
 The name it's because I've been testing this code initially using only images of Ganyu from Genshin Impact.
 
-*OBS: If you read those papers and check the code, you'll notice that some resources are missing. The explanation for this is...simply because I don't know how to do it. That's specially the case for layer fading from NVidia's paper.*
+*OBS: If you read those papers and check this code, you'll notice that some resources are missing. The explanation for this is...simply because I don't know how to do it. That's specially the case for layer fading from NVidia's paper.*
 
 ## References:
 **Pytorch's DCGAN Tutorial:** https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html
