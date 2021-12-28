@@ -7,5 +7,7 @@ The name it's because I've been testing this code initially using only images of
 
 ## References:
 **Pytorch's DCGAN Tutorial:** https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html
+
 **OpenAI's Improved Techniques for Training GANs:** https://arxiv.org/pdf/1606.03498.pdf
+
 **NVidia's PROGRESSIVE GROWING OF GANS FOR IMPROVED QUALITY, STABILITY, AND VARIATION:** https://arxiv.org/pdf/1710.10196.pdf
