@@ -11,6 +11,8 @@ The file data_selector.py consists of the creation of the dataset(originally 100
 
 After training for quite some time, the neural network is used to label the remaining 9000 images. All undesired images can then be eliminated. The remaining ones are then resized so they can be passed into the ProGAN to generate images.
 
+The ProGAN, in a nutshell, begins to train with low resolution images(4x4), and then progressively trains on higher resolution images(8x8 for level 1, 16x16 for level 2, 32x32 level 3 and so forth).
+
 
 ## References:
 **Nathan Inkawhich. Pytorch's DCGAN Tutorial:** https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html
