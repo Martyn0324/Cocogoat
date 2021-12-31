@@ -9,7 +9,7 @@ The name Cocogoat it's because I've been testing this code initially using a dat
 
 The file data_selector.py consists of the creation of the dataset(originally 100x100 Ganyu fanarts downloaded using [gallery-dl](https://github.com/mikf/gallery-dl)) and the creation of a multi-class neural network to classify images according to its quality and if they're not Ganyu fanarts. 1000 images are passed to a train dataset and manually labeled accordingly.
 
-After training for quite some time, the neural network is used to label the remaining 9000 images. All undesired images can then be eliminated. The remaining ones can be passed into the ProGAN to generate images.
+After training for quite some time, the neural network is used to label the remaining 9000 images. All undesired images can then be eliminated. The remaining ones are then resized so they can be passed into the ProGAN to generate images.
 
 
 ## References:
