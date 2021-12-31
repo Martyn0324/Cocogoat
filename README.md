@@ -18,3 +18,5 @@ After training for quite some time, the neural network is used to label the rema
 **Tim Salimans, Ian Goodfellow, Wojciech Zaremba, Vicki Cheung, Alec Radford and Xi Chen. Improved Techniques for Training GANs:** https://arxiv.org/pdf/1606.03498.pdf
 
 **Tero Karras, Timo Aila, Samuli Laine and Jaakko Lehtinen. PROGRESSIVE GROWING OF GANS FOR IMPROVED QUALITY, STABILITY, AND VARIATION:** https://arxiv.org/pdf/1710.10196.pdf
+
+*Some classes from Didática Tech(PT-BR) about DCGAN: https://didatica.tech/*
