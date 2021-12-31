@@ -6,7 +6,7 @@ from tensorflow.keras.models import Sequential
 import matplotlib.pyplot as plt
 from datasetcreator import DatasetCreator
 
-# Damn Pytorch. I DON'T want to use DataLoader.
+# Damn Pytorch. I DO NOT want to use DataLoader.
 
 data = DatasetCreator.images('D:/Python/gallery-dl/Ganyu', 100, 100)
 
@@ -24,10 +24,10 @@ for i in range(len(data)):
 
 X_train = data[0:1000] # 10% of a dataset seems reasonable.
 
-classes = ("Classify", "as", "you", "like")
+classes = ("Classify", "As", "You", "Like")
 
-for i in range(550, 1000): # Plotting the images so we can label them
-    X_train[i] = (X_train[i]+1.0)*0.5
+for i in range(0, 1000): # Plotting the images so we can label them
+    X_train[i] = (X_train[i]+1.0)*0.5 # Denormalizing
     plt.imshow(X_train[i])
     plt.title(f"image {i}")
     plt.show()
@@ -82,7 +82,7 @@ model.fit(X_train, y_train, batch_size=50, epochs=10000, verbose=1)
 
 model.save_weights('image_classifier')
 
-#model.load_weights('image_classifier') # After a good training, simply load the weight.
+#model.load_weights('image_classifier') # After a good training, simply load the weights.
 
 y_pred = model.predict(X_test, batch_size=10, verbose=1)
 
