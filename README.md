@@ -32,7 +32,7 @@ Considering that, we could pass an image like this into a LSTM
 
 ![illustration](https://user-images.githubusercontent.com/28028007/148013037-664707cf-75b9-45ca-8bd5-618d84139760.png)
 
-So it could predict what is missing based on what it already have:
+So it could predict what is missing based on what it already has:
 
 ![scheme](https://user-images.githubusercontent.com/28028007/148014309-9f8b4bf2-864b-4238-a2fa-fb2a12905d63.png)
 
