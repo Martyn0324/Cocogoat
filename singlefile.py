@@ -14,16 +14,37 @@ from datasetcreator import DatasetCreator # Custom class
 
 # Beginning to work with 4x4 images data
 
-ganyu4x4 = DatasetCreator.images('D:/Python/gallery-dl/deviantart/Popular/all-time/Ganyu', 4, 4)
+dataset = DatasetCreator.load_dataset('D:/Python/Projects', "filtered_images")
+
+# PIL doesn't support values [0,1] for RGB images
+
+for i in range(dataset.shape[0]):
+    dataset[i] = (dataset[i]+1.0)*0.5
+    dataset[i] = dataset[i]*255.0
+
+dataset = dataset.astype('uint8')
+
+print("Data resized")
+
+ganyu4x4 = []
+for i in dataset:
+    pic = Image.fromarray(i)
+    pic = pic.resize((4,4))
+    image = np.array(pic)
+    pic.close()
+    ganyu4x4.append(image)
+
+ganyu4x4 = np.array(ganyu4x4)
+
+ganyu4x4 = np.stack(ganyu4x4, axis=0)
 
 print(ganyu4x4.shape)
-print(ganyu4x4[0].shape)
-plt.imshow(ganyu4x4[0])
-plt.show()
 
-DatasetCreator.save_dataset('D:/Python/Projects/GANs', ganyu4x4, 'ganyu4x4')
+np.save("ganyu4x4", ganyu4x4)
 
-ganyu4x4 = DatasetCreator.load_dataset('D:/Python/Projects/GANs', 'ganyu4x4')
+print("Dataset saved!")
+
+ganyu4x4 = np.load("ganyu4x4.npy")
 
 ganyu4x4 = ganyu4x4.astype('float32')
 
@@ -43,7 +64,7 @@ def weights_init(m):
         nn.init.normal_(m.weight.data, 1.0, 0.02)
         nn.init.constant_(m.bias.data, 0)
 
-# Utility function just to create layers more easily
+# Utility function just to create layers more easily. It's kinda boring to calculate everything manually.
 
 def transconv2out(input, kernel, stride, padding):
     x = (input-1)*stride
@@ -61,18 +82,15 @@ class Generator(nn.Module):
     def __init__(self, ):
         super(Generator, self).__init__()
         self.transconv1 = nn.ConvTranspose2d( 100, 3, 4, 1, 0, bias=False)
-        '''self.batchnorm1 = nn.BatchNorm2d(ngf * 8)
+        # For level 2(generating 8x8 images):
+        '''self.transconv1 = nn.ConvTranspose2d(100, 50, 4, 1, 0, bias=False)
+        self.batchnorm1 = nn.BatchNorm2d(50)
         self.ReLU = nn.ReLU(True)
-        self.transconv2 = nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False)
-        self.batchnorm2 = nn.BatchNorm2d(ngf * 4)
-        self.transconv3 = nn.ConvTranspose2d( ngf * 4, ngf * 2, 4, 2, 1, bias=False)
-        self.batchnorm3 = nn.BatchNorm2d(ngf * 2)
-        self.transconv4 = nn.ConvTranspose2d( ngf * 2, ngf, 4, 2, 1, bias=False)
-        self.batchnorm4 = nn.BatchNorm2d(ngf)
-        self.transconv5 = nn.ConvTranspose2d( ngf, nc, 4, 2, 1, bias=False)'''
+        self.transconv2 = nn.ConvTranspose2d(50, 3, 4, 2, 1, bias=False)'''
+        # And so forth...
         self.tanh = nn.Tanh()
     
-    # Note: Consider adding LSTMs
+    # Note: Consider adding LSTMs ----> Check Prototype.py
     # Note²: Consider using Batchnorm with momentum = 0.8
     # Note³: Consider using LeakyReLU 0.2 just like NVidia did
 
@@ -80,8 +98,8 @@ class Generator(nn.Module):
         # Level 1 ---> 1 transconv only
         x = self.transconv1(input)
         output = self.tanh(x)
-        '''#Level 2
-        x = self.batchnorm1(x)
+        # Level 2
+        '''x = self.batchnorm1(x)
         x = self.ReLU(x)
         x = self.transconv2(x)
         output = self.tanh(x)'''
@@ -92,7 +110,7 @@ class Generator(nn.Module):
 # For LSTMs: We would need sequence(n) input ----> sequence(n) output
 # That is, we would need a sequence of images, or a sequence of feature maps, to get a sequence of images/feature maps as output.
 # Sequence of images ---> Preprocessing the data
-# Sequence of feature maps ---> Dealing with the output of the conv2d
+# Sequence of feature maps ---> Dealing with the output of the transconv2d
 
 netG = Generator().to(device)
 
@@ -103,6 +121,48 @@ netG.apply(weights_init) # This probably will only be useful for the 1st level (
 # Print the model
 #print(netG)
 #summary(netG, (100, 1,1))
+
+
+# From level 2 and beyond: load weights from previous level into new model.
+
+def weights_continue(previous_model, current_model, type='generator'):
+    '''Method used to implement weights from previous model into the current one in an automatized way.
+    Transconv weights basically have the same 4 dimensions, but different shapes. Batchnorm weights and biases got 1 dimension.
+    One could create a tensor full of zeros and add the values from the previous model weights into it.'''
+    previous_model = torch.load(f'{type}_{previous_model}.pth') # Loaded as a dict already.
+    #print(previous_model['transconv1.weight'].size()) # (100, 3, 4, 4)
+    current_model = current_model.state_dict()
+    #print(current_model['transconv1.weight'].size()) # (100, 50, 4, 4)
+    #print(current_model['batchnorm1.weight'].size(), current_model['batchnorm1.bias'].size()) # (50) | (50)
+    #print(current_model['transconv2.weight'].size()) # (50, 3, 4, 4)
+
+    # NVidia applied weight fading in the beginning of the new model(new layer), so it might be more interesting to apply the new weights at the beginning.
+    # This is done automatically by simply matching the keys name.
+
+    for key in current_model:
+        desired_shape = current_model[key].size()
+
+        for i in previous_model:
+            previous_shape = previous_model[i].size()
+
+            if key == i:
+                if current_model[key].dim() == 4:
+                    zeros = torch.zeros(desired_shape[0], desired_shape[1]-previous_shape[1], desired_shape[2], desired_shape[3]).to(device)
+
+                    weights = torch.cat((zeros, previous_model[i]), dim=1)
+                
+                if current_model[key].dim() == 1:
+                    zeros = torch.zeros(desired_shape[0]-previous_shape[0])
+
+                    weights = torch.cat((zeros, previous_model[i]), dim=0)
+
+                current_model[key] = weights
+
+                print("Weights Updated!")
+
+
+# Applying weights from previous level
+weights_continue('default_Cocogoat', netG, type='generator') # This method probably negates the weights_init. But I don't see how this could be bad.
 
 # Another utility function
 
@@ -121,10 +181,13 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         self.conv1 = nn.Conv2d(3, 1, 4, 1, 0, bias=False)
-        '''self.LeakyRelu = nn.LeakyReLU(0.2, inplace=True)
+        # Level 2:
+        '''self.conv1 = nn.Conv2d(3, 30, 6, 2, 2, bias=False)
+        self.LeakyRelu = nn.LeakyReLU(0.2, inplace=True)
         self.dropout = nn.Dropout(0.4, inplace=False) # Perhaps consider using Dropout2D? Or even 3D?
-        self.conv2 = nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False)
-        self.batchnorm2 = nn.BatchNorm2d(ndf * 2)
+        self.conv2 = nn.Conv2d(30, 1, 4, 1, 0, bias=False)'''
+        # And so on
+        '''self.batchnorm2 = nn.BatchNorm2d(ndf * 2)
         self.conv3 = nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False)
         self.batchnorm3 = nn.BatchNorm2d(ndf * 4)
         self.conv4 = nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False)
@@ -136,13 +199,30 @@ class Discriminator(nn.Module):
         # Level 1 ---> Conv and sigmoid
         x = self.conv1(input)
         output = self.sigmoid(x)
-        '''# Level 2
-        x = torch.randn(x.size()).to(device) + x # Adding random noise (Improved Technique from OpenAI)
+        # Level 2:
+        '''x = self.conv1(input)
+        x = torch.randn(x.size()).to(device) + x # Adding random noise, trick suggested by OpenAI.
         x = self.LeakyRelu(x)
         x = self.dropout(x)
-        x = self.conv2(x)
-        x = self.sigmoid(x)'''
-        # And so on...
+        x = self.conv2(x)'''
+        # Further and further
+        '''x = torch.randn(x.size()).to(device) + x
+        x = self.batchnorm2(x)
+        x = self.LeakyRelu(x)
+        x = self.dropout(x)
+        x = self.conv3(x)
+        x = torch.randn(x.size()).to(device) + x
+        x = self.batchnorm3(x)
+        x = self.LeakyRelu(x)
+        x = self.dropout(x)
+        x = self.conv4(x)
+        x = torch.randn(x.size()).to(device) + x
+        x = self.batchnorm4(x)
+        x = self.LeakyRelu(x)
+        x = self.dropout(x)
+        x = self.conv5(x)'''
+        output = self.sigmoid(x)
+
         return output
 
 # Create the Discriminator
@@ -150,7 +230,10 @@ netD = Discriminator().to(device)
 
 # Apply the weights_init function to randomly initialize all weights
 #  to mean=0, stdev=0.2.
-netD.apply(weights_init) # This probably will only be useful for the 1st level (4x4) of training
+netD.apply(weights_init)
+
+# Applying weights from previous level
+weights_continue('default_Cocogoat', netD, type='discriminator')
 
 # Print the model
 #print(netD)
@@ -334,12 +417,28 @@ def plot_images(fake=True, n_samples=16, noise=None, X_train=None, model='defaul
 
 # TEST SESSION
 
-#train(data=ganyu4x4,epochs=50001, checkpoint=5000, save_point=5000, model_name='default')
+train(data=ganyu4x4,epochs=500001, checkpoint=5000, save_point=5000, model_name='default_Cocogoat')
+# Don't worry about the number of epochs. At low levels, the training is quite fast. 1 million epochs takes around 1 hour of training in GeForce GTX 1650
 
 optimizerD = optim.Adam(netD.parameters(), lr=0.0005)
 optimizerG = optim.Adam(netG.parameters(), lr=0.0003)
 
 print("****BEGINNING MODEL1 TRAINING***")
-train(data=ganyu4x4, epochs=25001, checkpoint=5000, save_point=5000, model_name='model1')
+train(data=ganyu4x4, epochs=250001, checkpoint=5000, save_point=5000, model_name='Cocogoat1')
 
 #plot_images(fake=True, X_train=dataset, model='model1')
+
+# LEVEL 2
+
+train(data=ganyu8x8,epochs=500001, checkpoint=50000, save_point=50000, model_name='default_Cocogoat')
+
+optimizerD = optim.Adam(netD.parameters(), lr=0.0005)
+optimizerG = optim.Adam(netG.parameters(), lr=0.0003)
+
+print("****BEGINNING MODEL1 TRAINING***")
+
+weights_continue('Cocogoat1', netG, type='generator')
+weights_continue('Cocogoat1', netG, type='discriminator')
+train(data=ganyu8x8, epochs=500001, checkpoint=50000, save_point=50000, model_name='Cocogoat1')
+
+#plot_images(fake=True, X_train=dataset, model='Cocogoat1')
