@@ -125,44 +125,28 @@ netG.apply(weights_init) # This probably will only be useful for the 1st level (
 
 # From level 2 and beyond: load weights from previous level into new model.
 
-def weights_continue(previous_model, current_model, type='generator'):
-    '''Method used to implement weights from previous model into the current one in an automatized way.
-    Transconv weights basically have the same 4 dimensions, but different shapes. Batchnorm weights and biases got 1 dimension.
-    One could create a tensor full of zeros and add the values from the previous model weights into it.'''
-    previous_model = torch.load(f'{type}_{previous_model}.pth') # Loaded as a dict already.
-    #print(previous_model['transconv1.weight'].size()) # (100, 3, 4, 4)
-    current_model = current_model.state_dict()
-    #print(current_model['transconv1.weight'].size()) # (100, 50, 4, 4)
-    #print(current_model['batchnorm1.weight'].size(), current_model['batchnorm1.bias'].size()) # (50) | (50)
-    #print(current_model['transconv2.weight'].size()) # (50, 3, 4, 4)
+# Applying weights from previous level. This method probably negates the weights_init. But I don't see how this could be bad.
+# Also, the following code is more to see how to manipulate the weights tensors, since they're really gonna be applied in the training function.
+previous_generator = torch.load(f'generator_default_Cocogoat.pth')
+#print(previous_generator['transconv1.weight'].size()) # (100, 3, 4, 4)
+current_generator = netG.state_dict()
+#print(current_generator['transconv1.weight'].size()) # (100, 50, 4, 4)
 
-    # NVidia applied weight fading in the beginning of the new model(new layer), so it might be more interesting to apply the new weights at the beginning.
-    # This is done automatically by simply matching the keys name.
+desired_shape = current_generator['transconv1.weight'].size()
+previous_shape = previous_generator['transconv1.weight'].size()
 
-    for key in current_model:
-        desired_shape = current_model[key].size()
+zeros = torch.zeros(desired_shape[0], previous_shape[1], desired_shape[2], desired_shape[3]).to(device)
 
-        for i in previous_model:
-            previous_shape = previous_model[i].size()
+weights = torch.add(zeros, previous_generator['transconv1.weight'])
+#print(weights.size()) # (100, 3, 4, 4)
 
-            if key == i:
-                if current_model[key].dim() == 4:
-                    zeros = torch.zeros(desired_shape[0], desired_shape[1]-previous_shape[1], desired_shape[2], desired_shape[3]).to(device)
+weights = torch.cat((weights, weights, weights, weights), dim=1)
+weights = torch.cat((weights, weights, weights, weights), dim=1)
+#print(weights.size()) # (100, 48, 4, 4)
+zeros = torch.zeros(desired_shape[0], 2, desired_shape[2], desired_shape[3]).to(device)
+weights = torch.cat((weights, zeros), dim=1)
+#print(weights.size()) # (100, 50, 4, 4)
 
-                    weights = torch.cat((zeros, previous_model[i]), dim=1)
-                
-                if current_model[key].dim() == 1:
-                    zeros = torch.zeros(desired_shape[0]-previous_shape[0])
-
-                    weights = torch.cat((zeros, previous_model[i]), dim=0)
-
-                current_model[key] = weights
-
-                print("Weights Updated!")
-
-
-# Applying weights from previous level
-weights_continue('default_Cocogoat', netG, type='generator') # This method probably negates the weights_init. But I don't see how this could be bad.
 
 # Another utility function
 
@@ -232,8 +216,28 @@ netD = Discriminator().to(device)
 #  to mean=0, stdev=0.2.
 netD.apply(weights_init)
 
-# Applying weights from previous level
-weights_continue('default_Cocogoat', netD, type='discriminator')
+# Applying weights from previous level. Again, just for tensor manipulation. The real thing will happen inside the training function.
+previous_discriminator = torch.load(f'discriminator_default_Cocogoat.pth')
+current_discriminator = netD.state_dict()
+
+#print(previous_model['conv1.weight'].size()) # (1, 3, 4, 4)
+#print(current_model['conv1.weight'].size()) # (30, 3, 6, 6)
+
+#print(current_model['transconv1.weight'].size())
+desired_shape = current_discriminator['conv1.weight'].size()
+previous_shape = previous_discriminator['conv1.weight'].size()
+
+zeros = torch.zeros(desired_shape[0], desired_shape[1], previous_shape[2], previous_shape[3]).to(device)
+
+weights = torch.add(zeros, previous_discriminator['conv1.weight'])
+#print(weights.size())
+
+#weights = torch.cat((zeros, previous_model['conv1.weight']), dim=0)
+#print(weights.size()) # (1,3,6,4)
+
+upsampler = torch.nn.Upsample((6,6))
+weights = upsampler(weights)
+#print(weights.size()) # (30, 3, 6, 6)
 
 # Print the model
 #print(netD)
@@ -259,11 +263,37 @@ print("Starting Training Loop...")
 
 def train(data=None, epochs=1000, batch_size=6,loss=nn.BCELoss(), optimizerD=optimizerD, optimizerG=optimizerG, save_point=100, checkpoint=5000, model_name='model'):
     if os.path.isfile(f'discriminator_{model_name}.pth'):
-        netD.load_state_dict(torch.load(f'discriminator_{model_name}.pth'))
+        try:
+            netD.load_state_dict(torch.load(f'discriminator_{model_name}.pth')) # Loading checkpoint
+        
+        except RuntimeError:
+            previous_discriminator = torch.load(f'discriminator_{model_name}.pth') # Loading previous model's weights
+            current_discriminator = netD.state_dict()
+            desired_shape = current_discriminator['conv1.weight'].size()
+            previous_shape = previous_discriminator['conv1.weight'].size()
+            zeros = torch.zeros(desired_shape[0], desired_shape[1], previous_shape[2], previous_shape[3]).to(device)
+            weights = torch.add(zeros, previous_discriminator['conv1.weight'])
+            weights = upsampler(weights)
+            current_discriminator['conv1.weight'] = weights
     
     if os.path.isfile(f'generator_{model_name}.pth'):
-        netG.load_state_dict(torch.load(f'generator_{model_name}.pth'))
+        try:
+            netG.load_state_dict(torch.load(f'generator_{model_name}.pth')) # Checkpoint
+        
+        except RuntimeError:
+            previous_generator = torch.load(f'generator_{model_name}.pth') # Previous model's weights
+            current_generator = netG.state_dict()
+            desired_shape = current_generator['transconv1.weight'].size()
+            previous_shape = previous_generator['transconv1.weight'].size()
+            zeros = torch.zeros(desired_shape[0], previous_shape[1], desired_shape[2], desired_shape[3]).to(device)
+            weights = torch.add(zeros, previous_generator['transconv1.weight'])
+            weights = torch.cat((weights, weights, weights, weights), dim=1)
+            weights = torch.cat((weights, weights, weights, weights), dim=1)
+            zeros = torch.zeros(desired_shape[0], 2, desired_shape[2], desired_shape[3]).to(device)
+            weights = torch.cat((weights, zeros), dim=1)
+            current_generator['transconv1.weight'] = weights
 
+    print("Weights Updated!")
 
     for epoch in range(epochs):
         netD.zero_grad()
