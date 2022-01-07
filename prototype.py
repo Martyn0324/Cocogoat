@@ -90,7 +90,7 @@ class Generator(nn.Module):
         outputG = self.tanh(option1G)
         outputB = self.tanh(option1B)
 
-        output1 = torch.stack((outputR, outputG, outputB), 1) # Returns (1, 3, 64, 64)
+        output1 = torch.cat((outputR, outputG, outputB), dim=1) # Returns (1, 3, 64, 64)
 
         option2 = torch.reshape(out_lstm, (1, 3, 128, 224))
         option2 = self.transconvB(option2)
