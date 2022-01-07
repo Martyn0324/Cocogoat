@@ -95,6 +95,10 @@ class Generator(nn.Module):
         option2 = torch.reshape(out_lstm, (1, 3, 128, 224))
         option2 = self.transconvB(option2)
         output2 = self.tanh(option2)
+        
+        # For some motive, the outputs are all between 1e-07 and 1e-10. We'll have to apply a normalization function to fix this.
+
+        output1, output2 = self._fix_power_10(output1), self._fix_power_10(output2)
 
         return output1, output2
 
@@ -125,6 +129,11 @@ class Generator(nn.Module):
 
         # Returns (64-8, 8, 64) ---> (n_samples, timesteps, features) ---> ready for LSTM
         return torch.from_numpy(outputR).to(device), torch.from_numpy(outputG).to(device), torch.from_numpy(outputB).to(device)
+    
+    def _fix_power_10(self, input):
+        output = (input - torch.min(input))/(torch.max(input) - torch.min(input))
+
+        return output
       
       
 # Create the generator
@@ -238,7 +247,7 @@ def train(data=None, epochs=1000,loss=nn.BCELoss(), optimizerD=optimizerD, optim
     for epoch in range(epochs):
         netD.zero_grad()
         # Format batch
-        b_size = 1
+        b_size = 1 # Unfortunately, we'll have to use 1 sample at time, since the LSTMs are quite heavy.
         real_cpu = data[np.random.randint(0, data.shape[0], size=b_size), :, :, :].to(device)
         label = torch.full((real_cpu.shape[0],), real_label, dtype=torch.float, device=device)
         # Forward pass real batch through D
