@@ -57,3 +57,12 @@ That being said, I'm currently testing this hypothesis...and I'm not a researche
 *Some classes from Didática Tech(PT-BR) about DCGAN: https://didatica.tech/*
 
 **Florian Dedov(AKA Neural Nine):** https://www.youtube.com/watch?v=GFSiL6zEZF0 (Thanks for finally making me understand how these annoying, nitpicking LSTM layers work)
+
+
+## Further Reading
+
+**Andrew Brock, Jeff Donahue and Karen Simonyan. LARGE SCALE GAN TRAINING FOR HIGH FIDELITY NATURAL IMAGE SYNTHESIS: ** https://arxiv.org/pdf/1809.11096v2.pdf - Also Known as BigGAN. Best GAN so far. The article summarize the story behind data generating algorithms and the improvements developed around them, especially around GANs. Eliminates the need for Progressive Grow by using new tricks.
+
+**Prafulla Dhariwal and Alex Nichol. Diffusion Models Beat GANs on Image Synthesis: ** https://arxiv.org/pdf/2105.05233.pdf - I didn't know about Diffusion Models, but it seems they weren't that interesting...until this paper. Maybe they'll be the best architeture for generating images. Will try to make one as soon as I get some time to read the paper and its code completely(thanks for using Pytorch instead of tensorflow, OpenAI...but I still hate you for neglecting gym and RL).
+
+**Arash Vardat and Karsten Kreis. Improving Diffusion Models as an Alternative To GANs: ** https://developer.nvidia.com/blog/improving-diffusion-models-as-an-alternative-to-gans-part-1/ ; https://developer.nvidia.com/blog/improving-diffusion-models-as-an-alternative-to-gans-part-2/
