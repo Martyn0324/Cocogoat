@@ -185,22 +185,22 @@ class Discriminator(nn.Module):
         output = self.sigmoid(x)
         # Level 2:
         '''x = self.conv1(input)
-        x = torch.randn(x.size()).to(device) + x # Adding random noise, trick suggested by OpenAI.
+        #x = torch.randn(x.size()).to(device) + x # Adding random noise, trick suggested by OpenAI.
         x = self.LeakyRelu(x)
         x = self.dropout(x)
         x = self.conv2(x)'''
         # Further and further
-        '''x = torch.randn(x.size()).to(device) + x
+        '''#x = torch.randn(x.size()).to(device) + x
         x = self.batchnorm2(x)
         x = self.LeakyRelu(x)
         x = self.dropout(x)
         x = self.conv3(x)
-        x = torch.randn(x.size()).to(device) + x
+        #x = torch.randn(x.size()).to(device) + x
         x = self.batchnorm3(x)
         x = self.LeakyRelu(x)
         x = self.dropout(x)
         x = self.conv4(x)
-        x = torch.randn(x.size()).to(device) + x
+        #x = torch.randn(x.size()).to(device) + x
         x = self.batchnorm4(x)
         x = self.LeakyRelu(x)
         x = self.dropout(x)
@@ -245,8 +245,8 @@ weights = upsampler(weights)
 
 # Establish convention for real and fake labels during training --> Using 0.9 and 0.1 instead of 1 and 0 ---> One-sided label smoothing
 # https://arxiv.org/pdf/1606.03498.pdf
-real_label = 0.9
-fake_label = 0.1 
+real_label = 0.8
+fake_label = 0.2 
 
 # Setup Adam optimizers for both G and D ---> NVidia Progressive Grow: Same optimizer parameters with Adam - lr = 0.001, b1 = 0, b2 = 0.99
 optimizerD = optim.Adam(netD.parameters(), lr=0.001, betas=(0, 0.99)) # Consider changing learning rate or even the optimizer
