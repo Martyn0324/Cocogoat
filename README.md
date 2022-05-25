@@ -47,6 +47,34 @@ As the name suggests, this is just a prototype. Perhaps it would be more profita
 That being said, I'm currently testing this hypothesis...and I'm not a researcher in this area, which means I might not dedicate that much time into this...
 
 
+## Update
+
+![frankenstein-its-alive](https://user-images.githubusercontent.com/28028007/170381156-0e9b4e50-de03-411e-886f-2f40596ce097.gif)
+
+Some tips when testing:
+
+* The greater the batch size, the better.
+* Avoid using zeros in your weights. I thought about that when my weights in dimension 1 had size 3 and I wanted to concatenate it until it had size 50(50 isn't a multiple of 3). However, this will probably cause great harm to your model performance. Prefer using multiples of 3 in your channels as your model levels up.
+* When you get to level 3(generating images 16x16), beware of model collapse. My default model had both G and D LR = 0.001 and I was using 500.000 epochs for each level. Maybe this number wasn't necessary at all for level 1(4x4) and 2(8x8), but it didn't see to do any harm. However, in level 3, after 450.000 epochs I noticed what could be a possible beginning of model colapse. In level 4(32x32), the model collapsed after 200.000(innacurate number, I used checkpoints that would plot the output image after 50.000 epochs).
+
+### Examples of Model Collapse
+
+![image](https://user-images.githubusercontent.com/28028007/170381860-bd62f402-abfd-47b3-8b34-c5adb519df2c.png)
+
+-> Low diversity of outputs, images that are nothing more than some colored blur and has 9 evident squares(that are still present in normal/good outputs, but are way more subtle)
+
+![image](https://user-images.githubusercontent.com/28028007/170382154-4ea72cf6-ceb9-406f-9686-8e7839247a33.png)
+
+*Actually 200.000 + 80.000 epochs.*
+
+In my experience, your model is probably doing fine if your **Discriminator loss is around 1~1.5** and your **Generator loss is around 1.2~1.8**
+
+![image](https://user-images.githubusercontent.com/28028007/170382476-a04f6907-a7c6-486f-8a9c-815f7dc40399.png)
+*Default model level 3 after 450.000 epochs, what may be its optimal point. In 500.000 epochs, its performance is compromised*
+
+![image](https://user-images.githubusercontent.com/28028007/170382660-5180b995-0e2b-424e-b1e7-3ff77b4b15b3.png)
+
+
 ## References:
 **Nathan Inkawhich. Pytorch's DCGAN Tutorial:** https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html
 
