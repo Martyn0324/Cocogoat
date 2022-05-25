@@ -75,6 +75,8 @@ In my experience, your model is probably doing fine if your **Discriminator loss
 ![image](https://user-images.githubusercontent.com/28028007/170382660-5180b995-0e2b-424e-b1e7-3ff77b4b15b3.png)
 
 
+*PS: I still didn't test the Prototype Architecture... I didn't even reach level 6(128x128) with default Cocogoat. Maybe soon...who knows...*
+
 ## References:
 **Nathan Inkawhich. Pytorch's DCGAN Tutorial:** https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html
 
