@@ -95,7 +95,7 @@ I've actually tested Cocogoat with MNIST before actually testing it with Ganyu f
 
 ![image](https://user-images.githubusercontent.com/28028007/184609652-ef51f9e1-4321-4a65-bf46-94d1844c795e.png)
 
-*Cocogoat level 6(128x128) right after starting its training, after having the weights from level 5. The training was stopped right after the print, as I got a bit excited and wanted to try on Ganyu fanarts as soon as possible.*
+*Cocogoat level 6(128x128) right after starting its training, after having the weights from level 5 applied. The training was stopped right after the print, as I got a bit excited and wanted to try on Ganyu fanarts as soon as possible.*
 
 
 Meanwhile, when I tested Cocogoat on Ganyu fanarts, this was perhaps one of the few good results I got:
