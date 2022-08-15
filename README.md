@@ -104,7 +104,7 @@ Meanwhile, when I tested Cocogoat on Ganyu fanarts, this was perhaps one of the 
 
 The quality of the generated images tend to fall greatly after level 4...and there's also those annoying squares.
 
-However, it also seems that DCGAN architecture isn't quite good to generate images, according to what I've seen in (these)[https://github.com/jayleicn/animeGAN] (projects)[https://github.com/pavitrakumar78/Anime-Face-GAN-Keras]
+However, it also seems that DCGAN architecture isn't quite good to generate images, according to what I've seen in [these](https://github.com/jayleicn/animeGAN) [projects](https://github.com/pavitrakumar78/Anime-Face-GAN-Keras)
 
 So I wanted to make more tests and try to invent new things for Cocogoat, and I came with the idea of outputting the image generated in each level using a single generator, so I could analyze where the bigger problem is occurring.
 
