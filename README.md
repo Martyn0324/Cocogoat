@@ -77,6 +77,57 @@ In my experience, your model is probably doing fine if your **Discriminator loss
 
 *PS: I still didn't test the Prototype Architecture... I didn't even reach level 6(128x128) with default Cocogoat. Maybe soon...who knows...*
 
+## Update² + Prototype 2
+
+Unfortunately, my "original" idea for Cocogoat didn't work out at all. The output images didn't get better than those 2 images shown above, without any clear image, only blurred figures. There's also the 9 squares problem. Obviously, my generated images can't be compared to the images attached to the papers in the links below.
+
+This might be a problem with my dataset, as I'm using just under 7000 images to train my model from scratch, while those papers actually use datasets like MNIST(100,000 images) and ImageNet(more than **14 MILLION** images).
+
+I've actually tested Cocogoat with MNIST before actually testing it with Ganyu fanarts. This was the result:
+
+![image](https://user-images.githubusercontent.com/28028007/184609232-a78b8599-4fb5-4945-8377-00ff7c27db1d.png)
+
+*Cocogoat level 4(32x32) after 450,000 epochs*
+
+![image](https://user-images.githubusercontent.com/28028007/184609482-acf26c75-1970-4f0c-a6ed-6685650abe23.png)
+
+*Cocogoat level 5(64x64) after 50,000 epochs.*
+
+![image](https://user-images.githubusercontent.com/28028007/184609652-ef51f9e1-4321-4a65-bf46-94d1844c795e.png)
+
+*Cocogoat level 6(128x128) right after starting its training, after having the weights from level 5. The training was stopped right after the print, as I got a bit excited and wanted to try on Ganyu fanarts as soon as possible.*
+
+
+Meanwhile, when I tested Cocogoat on Ganyu fanarts, this was perhaps one of the few good results I got:
+
+![image](https://user-images.githubusercontent.com/28028007/184610555-01d07919-4dbc-45fe-bd12-1dcf8c457ddc.png)
+
+The quality of the generated images tend to fall greatly after level 4...and there's also those annoying squares.
+
+However, it also seems that DCGAN architecture isn't quite good to generate images, according to what I've seen in (these)[https://github.com/jayleicn/animeGAN] (projects)[https://github.com/pavitrakumar78/Anime-Face-GAN-Keras]
+
+So I wanted to make more tests and try to invent new things for Cocogoat, and I came with the idea of outputting the image generated in each level using a single generator, so I could analyze where the bigger problem is occurring.
+
+Then it came to me the idea "if I'll be using a single discriminator for each level...why not use the backpropagation of those discriminators to teach the generator how it should modify its weights?"
+
+Karras showed that a smaller image is easier to train and the *experience acquired* through that training can help generate bigger and more complex images. So, how about we implement this in a single architecture, with a some kind of feedback system?
+
+
+![endocrigan](https://user-images.githubusercontent.com/28028007/184614025-1d6d300c-a7b7-48b0-9482-d212d004a045.png)
+
+*Glorious Paint 3D design*
+
+It kind of resembles the endocrine feedback system. The generator itself could be analogous to the pituitary gland, secreting its hormone, the output 1, which would be received by the discriminator 1, which would, then, secrete another hormone that would work as a feedback system to the pituitary gland, the generator. That feedback can also influence the hormone(output 2) that is being secreted to another gland(discriminator 2). All this network controls the way our methabolism express itself(the final output).
+
+![image](https://user-images.githubusercontent.com/28028007/184615289-4e036bc7-4bb3-45c4-a8e4-eafa7231880b.png)
+
+*The hormonal feedback system in the the female reproductive system(which is easier to see the mechanism, as it's a more complex system than the male's)*
+
+However, this architecture indeed is quite heavy, as it'll be using many different networks(the discriminators) and with lower effectivity(fewer layers in order to avoid using too much memory), so it might be not effective at all...but I liked the idea anyway. I'll try testing it out but I won't be working too hard on it. Feel free to test it out...and perhaps try using a dataset that is bigger than 7,000 images...
+
+
+*PS²: I still didn't test the LSTM structure. I still don't know exactly how to deal with those layers...perhaps after I study some NLP...*
+
 ## References:
 **Nathan Inkawhich. Pytorch's DCGAN Tutorial:** https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html
 
