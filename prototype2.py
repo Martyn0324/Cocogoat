@@ -244,7 +244,7 @@ optimizerD16 = optim.Adam(D16.parameters(), lr=0.001, betas=(0, 0.99))
 optimizerD32 = optim.Adam(D32.parameters(), lr=0.001, betas=(0, 0.99))
 optimizerD64 = optim.Adam(D64.parameters(), lr=0.001, betas=(0, 0.99))
 
-optimizerG = optim.Adam(netG.parameters(), lr=0.001, betas=(0, 0.99))
+optimizerG = optim.AdamW(netG.parameters(), lr=0.001, betas=(0, 0.99), weight_decay=1e-5)
 
 
 
@@ -311,7 +311,7 @@ def train(
         errD4_fake, errD8_fake, errD16_fake = loss(Dout1, label), loss(Dout2, label), loss(Dout3, label)
         errD32_fake, errD64_fake = loss(Dout4, label), loss(Dout, label)
         
-        # Calculate the gradients for this batch, accumulated (summed) with previous gradients --- Most probably need adjustments
+        # Calculate the gradients for this batch. D4 will be accumulated (summed) with previous gradients
         errD4_fake.backward()
         optimizerD4.step()
         
@@ -340,6 +340,7 @@ def train(
         errD64 = errD64_fake
         
         # Update D ----- Moved to lines above to avoid things like "using D64's loss to backpropagate through D8's network"
+        # UPDATE: After running some tests, I've discovered that this won't be happening. Each Neural Network acts independently from each other.
         #optimizerD.step()
         #optimizerD4.step()
         #optimizerD8.step()
@@ -370,7 +371,7 @@ def train(
         errG2.backward(retain_graph=True)
         errG3.backward(retain_graph=True)
         errG4.backward(retain_graph=True)
-        errG5.backward()
+        errG5.backward(retain_graph=True)
         
         # Update G
         optimizerG.step()
