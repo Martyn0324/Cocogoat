@@ -139,6 +139,8 @@ However, this architecture indeed is quite heavy, as it'll be using many differe
 
 **Florian Dedov(AKA Neural Nine):** https://www.youtube.com/watch?v=GFSiL6zEZF0 (Thanks for finally making me understand how these annoying, nitpicking LSTM layers work)
 
+**sgrvinod**: https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Super-Resolution/tree/8a2ecba423760bfed791a92748bdc58de7fed918
+
 
 ## Further Reading
 
