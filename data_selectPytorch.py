@@ -50,6 +50,7 @@ class Data(torch.utils.data.Dataset):
         self.labels = y
 
     def __getitem__(self, idx):
+        idx = idx-1
         data = self.data[idx]
         label = self.labels[idx]
 
