@@ -143,129 +143,66 @@ class ConvBlock(nn.Module):
 class FilterNN(nn.Module):
     def __init__(self):
         super(FilterNN, self).__init__()
+
+        self.conv1 = nn.Conv2d(3, 1000, 2, 2, 0, bias=False)
+        self.batchnorm1 = nn.BatchNorm2d(1000)
+        self.Relu = nn.ReLU(inplace=True)
+        self.dropout = nn.Dropout(0.5)
+        self.conv2 = nn.Conv2d(1000, 100, 2, 2, 0, bias=False) # 50x50
+        self.batchnorm2 = nn.BatchNorm2d(100)
         
-        self.convblock1 = ConvBlock(3, 9, 6, 1, 0) # 175x175
-        self.convblock2 = ConvBlock(9, 27, 6, 1, 0) # 150x150
-        self.convblock3 = ConvBlock(27, 30, 6, 1, 0) # 125x125
-        self.convblock4 = ConvBlock(30, 90, 6, 1, 0) # 100x100
-        self.convblock5 = ConvBlock(90, 30, 6, 1, 0) # 75x75
-        self.convblock6 = ConvBlock(30, 27, 6, 1, 0) # 50x50
-        self.convblock7 = ConvBlock(27, 9, 6, 1, 0) # 25x25
-        self.conv8 = nn.Conv2d(9, 15, 6, 1, 0, bias=False) # 20x20
-        self.batchnorm8 = nn.BatchNorm2d(15)
-        self.conv9 = nn.Conv2d(15, 9, 6, 1, 0, bias=False) # 15x15
-        self.batchnorm9 = nn.BatchNorm2d(9)
-        self.conv10 = nn.Conv2d(9, 6, 6, 1, 0, bias=False) # 10x10
-        self.batchnorm10 = nn.BatchNorm2d(6)
-        self.conv11 = nn.Conv2d(6, 4, 6, 1, 0, bias=False) # 5x5
-        self.batchnorm11 = nn.BatchNorm2d(4)
-        self.conv12 = nn.Conv2d(4, 3, 5, 1, 0, bias=False) # 1x1
-        
-        
-        self.convalt1 = nn.Conv2d(3, 9, 26, 1, 0, bias=False) # 175x175
-        self.batchnorm1 = nn.BatchNorm2d(9)
-        self.convalt2 = nn.Conv2d(9, 27, 26, 1, 0, bias=False) # 150x150
-        self.batchnorm2 = nn.BatchNorm2d(27)
-        self.convalt3 = nn.Conv2d(27, 30, 26, 1, 0, bias=False) # 125x125
-        self.batchnorm3 = nn.BatchNorm2d(30)
-        self.convalt4 = nn.Conv2d(30, 90, 26, 1, 0, bias=False) # 100x100
-        self.batchnorm4 = nn.BatchNorm2d(90)
-        self.convalt5 = nn.Conv2d(90, 30, 26, 1, 0, bias=False) # 75x75
-        self.batchnorm5 = nn.BatchNorm2d(30)
-        self.convalt6 = nn.Conv2d(30, 27, 26, 1, 0, bias=False) # 50x50
-        self.batchnorm6 = nn.BatchNorm2d(27)
-        self.convalt7 = nn.Conv2d(27, 9, 26, 1, 0, bias=False) # 25x25
-        self.batchnorm7 = nn.BatchNorm2d(9)
-        
-        self.Relu = nn.ReLU()
-        
+        self.convblock3 = ConvBlock(100, 75, 3, 1, 0)
+        self.convblock4 = ConvBlock(75, 50, 3, 1, 0)
+        self.convblock5 = ConvBlock(50, 25, 3, 1, 0)
+        self.convblock6 = ConvBlock(25, 10, 3, 1, 0)
+        self.conv7 = nn.Conv2d(10, 8, 3, 1, 0)
+        self.batchnorm7 = nn.BatchNorm2d(8)
+        self.conv8 = nn.Conv2d(8, 6, 4, 1, 0)
+        self.batchnorm8 = nn.BatchNorm2d(6)
+        self.conv9 = nn.Conv2d(6, 4, 4, 1, 0)
+        self.batchnorm9 = nn.BatchNorm2d(4)
+        self.conv10 = nn.Conv2d(4, 3, 2, 1, 0)
+    
     def forward(self, input):
         
-        r1 = self.convalt1(input)
-        r1 = self.batchnorm1(r1)
-        r1 = self.Relu(r1)
-        
-        x = self.convblock1(input)
+        x = self.conv1(input)
+        x = self.batchnorm1(x)
         x = self.Relu(x)
-        
-        x = x + r1
-        
-        r2 = self.convalt2(r1)
-        r2 = self.batchnorm2(r2)
-        r2 = self.Relu(r2)
-        
-        x = self.convblock2(x)
+        x = self.dropout(x)
+        x = self.conv2(x)
+        x = self.batchnorm2(x)
         x = self.Relu(x)
-        
-        x = x + r2
-        
-        r3 = self.convalt3(r2)
-        r3 = self.batchnorm3(r3)
-        r3 = self.Relu(r3)
+        x = self.dropout(x)
         
         x = self.convblock3(x)
         x = self.Relu(x)
-        
-        x = x + r3
-        
-        r4 = self.convalt4(r3)
-        r4 = self.batchnorm4(r4)
-        r4 = self.Relu(r4)
-        
+        x = self.dropout(x)
         x = self.convblock4(x)
         x = self.Relu(x)
-        
-        x = x + r4
-        
-        r5 = self.convalt5(r4)
-        r5 = self.batchnorm5(r5)
-        r5 = self.Relu(r5)
-        
+        x = self.dropout(x)
         x = self.convblock5(x)
         x = self.Relu(x)
-        
-        x = x + r5
-        
-        r6 = self.convalt6(r5)
-        r6 = self.batchnorm6(r6)
-        r6 = self.Relu(r6)
-        
+        x = self.dropout(x)
         x = self.convblock6(x)
         x = self.Relu(x)
+        x = self.dropout(x)
         
-        x = x + r6
-        
-        r7 = self.convalt7(r6)
-        r7 = self.batchnorm7(r7)
-        r7 = self.Relu(r7)
-        
-        x = self.convblock7(x)
+        x = self.conv7(x)
+        x = self.batchnorm7(x)
         x = self.Relu(x)
-        
-        x = x + r7
-        
-        x = r7
-        
+        x = self.dropout(x)
         x = self.conv8(x)
         x = self.batchnorm8(x)
         x = self.Relu(x)
-        
+        x = self.dropout(x)
         x = self.conv9(x)
         x = self.batchnorm9(x)
         x = self.Relu(x)
-        
+        x = self.dropout(x)
         x = self.conv10(x)
-        x = self.batchnorm10(x)
-        x = self.Relu(x)
         
-        x = self.conv11(x)
-        x = self.batchnorm11(x)
-        x = self.Relu(x)
-        
-        x = self.conv12(x)
-        
-        output = self.Relu(x)
-        
+        output = self.Relu(x) # Pytorch's Cross Entropy includes a softmax function.
+
         return output
       
       
@@ -284,8 +221,10 @@ def train(dataset=None, epochs=1000, batch_size=6,loss=nn.CrossEntropyLoss(), op
     for epoch in range(epochs):
         for item, (data, labels) in enumerate(dataloader):
             Filter.zero_grad()
+
             output = Filter(data.to(device))
-            output = output.view(output.shape[0], -1) # Cross Entropy ----> output = (Batch, 3); labels = (Batch)
+
+            output = output.view(output.shape[0], -1) # Cross Entropy ----> output = (Batch, 3); labels = (Batch) ---> Index encoding. This is why type(labels) = int
             
             labels = labels.to(device)
 
@@ -297,17 +236,17 @@ def train(dataset=None, epochs=1000, batch_size=6,loss=nn.CrossEntropyLoss(), op
 
             best_loss = float("inf")
             if cost < best_loss:
+                best_loss = cost
                 best_params = Filter.state_dict()
     
             if item % checkpoint == 0 or epoch == epochs-1:
                 print(f"{epoch}|{epochs}\t Iteration: {item}\t Model Loss: {cost}\t Last LR: {scheduler.get_last_lr()}")
-                print(Filter.conv12.weight.grad) # Monitoring gradients
 
                 torch.save(best_params, f'Filter.pth')
 
                 print("Model saved!")
                 
-        #scheduler.step()
+        scheduler.step()
         
         
         
@@ -318,7 +257,7 @@ def predict(data=None, batch_size=6):
 
     for item, data in enumerate(inputs):
         
-        Filter.load_state_dict(torch.load("Filter.pth"))
+        Filter.load_state_dict(torch.load("Dataset_Filter.pth"))
 
         predicted = Filter(data.to(device))
         for label in predicted:
