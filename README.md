@@ -3,16 +3,27 @@ Progressive DCGAN created on Pytorch, based on many different codes. The only or
 
 The name Cocogoat it's because I've been testing this code initially using a dataset of 10.000 images of Ganyu from Genshin Impact.
 
-*OBS: If you read the reference papers and check this code, you'll notice that some resources are missing. The explanation for this is...simply because I don't know how to do it. That's especially the case for layer fading from NVidia's paper.*
+## Creating dataset
 
-## How it works
+The file `DataAugmentator.ipynb` has a model and some functions to provide Data Augmentation. The model is used to basically select Ganyu's face on each image. In the DataAugmentation function, the same model is used in evaluation mode to extract Ganyu's face and resize that box so it has the same size as the other images in the dataset. Other functions are also included.
 
-The file data_selector.py consists of the creation of the dataset(originally 100x100 Ganyu fanarts downloaded using [gallery-dl](https://github.com/mikf/gallery-dl)) and the creation of a multi-class neural network to classify images according to its quality and if they're not Ganyu fanarts. 1000 images are passed to a train dataset and manually labeled accordingly.
+The files data_selector.py(or Pytorch version) consists of a Neural Network used to filter the images in your dataset(originally 100x100 Ganyu fanarts downloaded using [gallery-dl](https://github.com/mikf/gallery-dl)) and the creation of a multi-class neural network to classify images according to its quality and if they're not Ganyu fanarts. 3000 images are passed to a train dataset and manually labeled accordingly.
 
-After training for a small time(the performance stabilizes at around 500), the neural network is used to label the remaining 9000 images. All undesired images can then be eliminated. The remaining ones are then resized so they can be passed into the ProGAN to generate images.
+After training for some time(the performance stabilizes at around 100 epochs with learning_rate = 1e-3), the neural network is used to label the remaining 9000 images. All undesired images can then be eliminated.
+
+## The Cocogoat Model -- **Work in Progress**
 
 The ProGAN, in a nutshell, begins to train with low resolution images(4x4), and then progressively trains on higher resolution images(8x8 for level 1, 16x16 for level 2, 32x32 level 3 and so forth). This strategy makes it easier for the Neural Network to learn patterns as the weights are initially adjusted with simple data and only when the weights are properly calibrated they are adjusted with more complex data.
 
+However, while testing this, I've noticed that, even with the transfer learning, there's a point where the model simply collapses, usually with images at around 32x32 and 64x64. **This did NOT happen when dealing with the Fashion MNIST dataset**, which might indicate that sufficiently large datasets(+- 100,000 images) might contribute to the GAN performance. This is where the Emboxer, the neural network for Data Augmentation, comes in.
+
+I also want to try other alternatives. I've been making some tests using the DCGAN architecture(since it's the only architecture that really worked for me so far...though it's inappropriate even for a proper dataset like the Animeface dataset). Relativistic Discriminators seem a silly idea, but in my tests they appear to rarely get out of control.
+The SRGAN also came with the idea of using Residual Blocks in GANs, and this appear to help with vanishing gradients and to have a better performance. ESRGAN discovered that BatchNormalization layers in the Generator causes some random noise in the generated images(though, in my experience, I've seen that they're essential to keep the discriminator under control).
+In my tests, I also discovered that dropout layers might help with the Discriminator performance, but they also induce random noise in the Generator output.
+
+Real-ESRGAN also uses a UNet discriminator, something that is also used by OpenAI's Guided Diffusion and provides a better feedback to the Generator, since it classifies both the image and the pixels.
+
+Karras, in Progressive Grow, used a "pixel-wise normalization" technique. In my tests, this normalization technique contributed immensely to...collapse my model miserably. So I'll just stick to normal things.
 
 ## Prototype
 
@@ -46,6 +57,7 @@ As the name suggests, this is just a prototype. Perhaps it would be more profita
 
 That being said, I'm currently testing this hypothesis...and I'm not a researcher in this area, which means I might not dedicate that much time into this...
 
+### Update: This idea might be interesting not to generate images, but actually to recompose images. For this, however, it might be way more interesting to use masked inputs or even Attention Layers(a kind of layer that I also consider to test in image generation...in a different way than SAGAN)
 
 ## Update
 
@@ -56,6 +68,8 @@ Some tips when testing:
 * The greater the batch size, the better.
 * Avoid using zeros in your weights. I thought about that when my weights in dimension 1 had size 3 and I wanted to concatenate it until it had size 50(50 isn't a multiple of 3). However, this will probably cause great harm to your model performance. Prefer using multiples of 3 in your channels as your model levels up.
 * When you get to level 3(generating images 16x16), beware of model collapse. My default model had both G and D LR = 0.001 and I was using 500.000 epochs for each level. Maybe this number wasn't necessary at all for level 1(4x4) and 2(8x8), but it didn't see to do any harm. However, in level 3, after 450.000 epochs I noticed what could be a possible beginning of model colapse. In level 4(32x32), the model collapsed after 200.000(innacurate number, I used checkpoints that would plot the output image after 50.000 epochs).
+* The bigger your dataset, the better.
+* **Use Relativistic Discriminator**
 
 ### Examples of Model Collapse
 
@@ -77,7 +91,7 @@ In my experience, your model is probably doing fine if your **Discriminator loss
 
 *PS: I still didn't test the Prototype Architecture... I didn't even reach level 6(128x128) with default Cocogoat. Maybe soon...who knows...*
 
-## Update² + Prototype 2
+## Update²
 
 Unfortunately, my "original" idea for Cocogoat didn't work out at all. The output images didn't get better than those 2 images shown above, without any clear image, only blurred figures. There's also the 9 squares problem. Obviously, my generated images can't be compared to the images attached to the papers in the links below.
 
@@ -106,27 +120,6 @@ The quality of the generated images tend to fall greatly after level 4...and the
 
 However, it also seems that DCGAN architecture isn't quite good to generate images, according to what I've seen in [these](https://github.com/jayleicn/animeGAN) [projects](https://github.com/pavitrakumar78/Anime-Face-GAN-Keras)
 
-So I wanted to make more tests and try to invent new things for Cocogoat, and I came with the idea of outputting the image generated in each level using a single generator, so I could analyze where the bigger problem is occurring.
-
-Then it came to me the idea "if I'll be using a single discriminator for each level...why not use the backpropagation of those discriminators to teach the generator how it should modify its weights?"
-
-Karras showed that a smaller image is easier to train and the *experience acquired* through that training can help generate bigger and more complex images. So, how about we implement this in a single architecture, with a some kind of feedback system?
-
-
-![endocrigan](https://user-images.githubusercontent.com/28028007/184614025-1d6d300c-a7b7-48b0-9482-d212d004a045.png)
-
-*Glorious Paint 3D design*
-
-It kind of resembles the endocrine feedback system. The generator itself could be analogous to the pituitary gland, secreting its hormone, the output 1, which would be received by the discriminator 1, which would, then, secrete another hormone that would work as a feedback system to the pituitary gland, the generator. That feedback can also influence the hormone(output 2) that is being secreted to another gland(discriminator 2). All this network controls the way our methabolism express itself(the final output).
-
-![image](https://user-images.githubusercontent.com/28028007/184615289-4e036bc7-4bb3-45c4-a8e4-eafa7231880b.png)
-
-*The hormonal feedback system in the the female reproductive system(which is easier to see the mechanism, as it's a more complex system than the male's)*
-
-However, this architecture indeed is quite heavy, as it'll be using many different networks(the discriminators) and with lower effectivity(fewer layers in order to avoid using too much memory), so it might be not effective at all...but I liked the idea anyway. I'll try testing it out but I won't be working too hard on it. Feel free to test it out...and perhaps try using a dataset that is bigger than 7,000 images...
-
-
-*PS²: I still didn't test the LSTM structure. I still don't know exactly how to deal with those layers...perhaps after I study some NLP...*
 
 ## References:
 **Nathan Inkawhich. Pytorch's DCGAN Tutorial:** https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html
@@ -141,6 +134,14 @@ However, this architecture indeed is quite heavy, as it'll be using many differe
 
 **sgrvinod**: https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Super-Resolution/tree/8a2ecba423760bfed791a92748bdc58de7fed918
 
+**Alexia Jolicoeur-Martineau. The relativistic discriminator: a key element missing
+from standard GAN:** https://arxiv.org/pdf/1807.00734.pdf - Probably a so special element that seems to even discard the previous techniques.
+
+**Xintao Wang, Ke Yu, Shixiang Wu, Jinjin Gu, Yihao Liu, Chao Dong, Chen Change Loy, Yu Qiao, Xiaoou Tang. ESRGAN: Enhanced Super-Resolution
+Generative Adversarial Networks:** https://arxiv.org/pdf/1809.00219.pdf
+
+**Xintao Wang, Liangbin Xie, Chao Dong, Ying Shan. Real-ESRGAN: Training Real-World Blind Super-Resolution
+with Pure Synthetic Data:** https://arxiv.org/pdf/2107.10833.pdf
 
 ## Further Reading
 
