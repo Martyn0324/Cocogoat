@@ -150,3 +150,9 @@ with Pure Synthetic Data:** https://arxiv.org/pdf/2107.10833.pdf
 **Prafulla Dhariwal and Alex Nichol. Diffusion Models Beat GANs on Image Synthesis:** https://arxiv.org/pdf/2105.05233.pdf - I didn't know about Diffusion Models, but it seems they weren't that interesting...until this paper. Maybe they'll be the best architeture for generating images. Will try to make one as soon as I get some time to read the paper and its code completely(thanks for using Pytorch instead of tensorflow, OpenAI...but I still hate you for neglecting gym and RL).
 
 **Arash Vardat and Karsten Kreis. Improving Diffusion Models as an Alternative To GANs:** https://developer.nvidia.com/blog/improving-diffusion-models-as-an-alternative-to-gans-part-1/ ; https://developer.nvidia.com/blog/improving-diffusion-models-as-an-alternative-to-gans-part-2/
+
+**Alammar, Jay. The Illustrated Stable Diffusion:** https://jalammar.github.io/illustrated-stable-diffusion/
+
+**Singh, Vaibhav. An In-Depth Guide to Denoising Diffusion Probabilistic Models - From Theory to Implementation:** https://learnopencv.com/denoising-diffusion-probabilistic-models/#Mathematical-Details-Of-The-Forward-Diffusion-Process
+
+**Weng, Lilian. (Jul 2021). What are diffusion models? Lil’Log:** https://lilianweng.github.io/posts/2021-07-11-diffusion-models/.
