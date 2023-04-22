@@ -24,7 +24,7 @@ I've also managed to finally make a functional Diffusion Model, which is a Denoi
 
 It's interesting to note that Failure modes of Diffusion models are quite similar to GAN's. In Diffusion Models, some images can't be properly produced in the sampling mode due to insufficient training, thus, the model generates black or white squares, without any image. It's also possible to note some "mode collapse" in some cases. Using higher resolution images also tends to make the model more unstable and it'll require more epochs to produce proper results *consistently*.
 
-I've also figured out that using a big dataset will provide better results, so I'm working on models to filter a big dataset composed of Genshin characters fanarts. In order to avoid having to label dozens of thousands of images, I'm making some experiments on pretraining a model based on Minimum Entropy, with supervised fine-tuning plus self-learning. It's been taking a while to learn how to properly apply it, but the Minimum Entropy has been going fine. Now, the problem is just with the fine-tuning, as it compromises severely the self-learning process.
+I've also figured out that using a big dataset will provide better results, so I'm working on models to filter a big dataset composed of Genshin characters fanarts. In order to avoid having to label dozens of thousands of images, I'm making some experiments on pretraining a model based on [Minimum Entropy](https://github.com/xidianai/MinEnt/tree/main/MinEnt), with supervised fine-tuning plus self-learning. It's been taking a while to learn how to properly apply it, but the Minimum Entropy has been going fine. Now, the problem is just with the fine-tuning, as it compromises severely the self-learning process.
 The model also might have some elements of few-shot, as the complete dataset has 48,000 images and the fine-tuning process consists of 1,000 images.
 
 ## ~~The Cocogoat Model -- **Work in Progress**~~
@@ -41,40 +41,6 @@ Real-ESRGAN also uses a UNet discriminator, something that is also used by OpenA
 
 Karras, in Progressive Grow, used a "pixel-wise normalization" technique. In my tests, this normalization technique contributed immensely to...collapse my model miserably. So I'll just stick to normal things.
 
-## Prototype
-
-I've never seen any image generating GAN using LSTMs, so I decided to give it a chance. Perhaps LSTMs aren't used for images simply because it isn't worth it, but I'm still eager to give it a try and see it for myself.
-
-Instead of passing sequences of data directly into the LSTM layer, I've decided to let the GAN try to generate and image from noise using the transposed 2D convs, and, at the end of the neural network, when the image has already been generated, pass it into a LSTM layer. The idea here is to make the Neural Network try to predict correctly what is the best pixel value to be added into an image based on what has been created so far.
-
-Suppose that the final tranposed conv 2D layer returned certain image. We'll have an image with 3 channels(RGB) and height x width dimensions.
-Each channel would be something like this:
-
-![rubbish](https://user-images.githubusercontent.com/28028007/148013549-2ae06096-b728-4647-b757-0e4c4a9d5ac8.png)
-
-That is, a grid, which could also be seen as a table, just like a DataFrame or Series when we work with Pandas, where we got X (height) and Y labels(width). Each value of X is assigned to a value of Y. That can be more easily visualized if you think about price prediction, for example. You got a table of values, with X being the open price of that asset that day, and Y being the close price. You want to use the open price to predict the close price. Then, you have a table with X values and Y values, convert them into a sequence dataset, pass into a LSTM and voilá.
-With images, I'm simply considering that I have the same table, but, in a 8x8 image, I'll have a table with 8 columns and 8 values. Some of those columns can be considered my X to predict the Y, the remaining ones.
-
-Considering that, we could pass an image like this into a LSTM
-
-![illustration](https://user-images.githubusercontent.com/28028007/148013037-664707cf-75b9-45ca-8bd5-618d84139760.png)
-
-So it could predict what is missing based on what it already has:
-
-![scheme](https://user-images.githubusercontent.com/28028007/148014309-9f8b4bf2-864b-4238-a2fa-fb2a12905d63.png)
-
-Unfortunately, though, I was stupid and didn't consider that creating sequences would make me get more data than an array (1,3,8,8) could support, so I have to pass the output of that LSTM to another tranposed conv 2D, in order to filter some data and if everything goes ok, I could get something like this:
-
-![complete](https://user-images.githubusercontent.com/28028007/148014411-2ea06314-7300-4937-a63b-ad81d6b48a5d.png)
-
-As the name suggests, this is just a prototype. Perhaps it would be more profitable to, instead of inserting the LSTM into the Generator, to create a second Generator with those LSTMs. I'll see how this goes with time.
-
-*None of those images have been generated by this neural network. I'm just trying to explain my idea. Maybe someone could think about something better based on that*
-
-That being said, I'm currently testing this hypothesis...and I'm not a researcher in this area, which means I might not dedicate that much time into this...
-
-### Update: This idea might be interesting not to generate images, but actually to recompose images. For this, however, it might be way more interesting to use masked inputs or even Attention Layers(a kind of layer that I also consider to test in image generation...in a different way than SAGAN)
-
 ## Update
 
 ![frankenstein-its-alive](https://user-images.githubusercontent.com/28028007/170381156-0e9b4e50-de03-411e-886f-2f40596ce097.gif)
@@ -86,6 +52,7 @@ Some tips when testing:
 * When you get to level 3(generating images 16x16), beware of model collapse. My default model had both G and D LR = 0.001 and I was using 500.000 epochs for each level. Maybe this number wasn't necessary at all for level 1(4x4) and 2(8x8), but it didn't see to do any harm. However, in level 3, after 450.000 epochs I noticed what could be a possible beginning of model colapse. In level 4(32x32), the model collapsed after 200.000(innacurate number, I used checkpoints that would plot the output image after 50.000 epochs).
 * The bigger your dataset, the better.
 * **Use Relativistic Discriminator**
+* **Use Duelling Discriminators...the more discriminators, the better**
 
 ### Examples of Model Collapse
 
