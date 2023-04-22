@@ -11,7 +11,23 @@ The files data_selector.py(or Pytorch version) consists of a Neural Network used
 
 After training for some time(the performance stabilizes at around 100 epochs with learning_rate = 1e-3), the neural network is used to label the remaining 9000 images. All undesired images can then be eliminated.
 
-## The Cocogoat Model -- **Work in Progress**
+## **UPDATE:** Optimized Cocogoat, Diffusion Model and Minimum Entropy
+
+The original idea for Cocogoat wasn't that effective at all, as it takes too much time to get ok 16x16 images, and the model tends to collapse at 32x32 images when the dataset is too small.
+
+It seems that the current state-of-the-art GAN, StyleGAN, uses the Progressive Grow idea in a much smarter way: the Generator must create 64x64 images, but it outputs all images generated on the way. It means that the generator actually produces images 4x4, 8x8, 16x16, 32x32 and 64x64. This makes it possible to take advantage of the progressive growing process while also having to spend less time training...at a lesser risk os mode collapse.
+Unfortunately, you'll also have to use multiple discriminators, which means more computational power. Because of that, I wasn't able to produce images bigger than 32x32. However, using multiple Discriminators also increase the GAN stability, which ends up being helpful.
+
+The code can be seem in the Optimized Cocogoat notebook.
+
+I've also managed to finally make a functional Diffusion Model, which is a Denoising Diffusion Probabilistic Model, and it managed to generate quite interesting outputs. They have nothing to do with the dataset, but hey, that's some beautiful colors. The code can be found in the Diffusion notebook.
+
+It's interesting to note that Failure modes of Diffusion models are quite similar to GAN's. In Diffusion Models, some images can't be properly produced in the sampling mode due to insufficient training, thus, the model generates black or white squares, without any image. It's also possible to note some "mode collapse" in some cases. Using higher resolution images also tends to make the model more unstable and it'll require more epochs to produce proper results *consistently*.
+
+I've also figured out that using a big dataset will provide better results, so I'm working on models to filter a big dataset composed of Genshin characters fanarts. In order to avoid having to label dozens of thousands of images, I'm making some experiments on pretraining a model based on Minimum Entropy, with supervised fine-tuning plus self-learning. It's been taking a while to learn how to properly apply it, but the Minimum Entropy has been going fine. Now, the problem is just with the fine-tuning, as it compromises severely the self-learning process.
+The model also might have some elements of few-shot, as the complete dataset has 48,000 images and the fine-tuning process consists of 1,000 images.
+
+## ~~The Cocogoat Model -- **Work in Progress**~~
 
 The ProGAN, in a nutshell, begins to train with low resolution images(4x4), and then progressively trains on higher resolution images(8x8 for level 1, 16x16 for level 2, 32x32 level 3 and so forth). This strategy makes it easier for the Neural Network to learn patterns as the weights are initially adjusted with simple data and only when the weights are properly calibrated they are adjusted with more complex data.
 
@@ -142,6 +158,10 @@ Generative Adversarial Networks:** https://arxiv.org/pdf/1809.00219.pdf
 
 **Xintao Wang, Liangbin Xie, Chao Dong, Ying Shan. Real-ESRGAN: Training Real-World Blind Super-Resolution
 with Pure Synthetic Data:** https://arxiv.org/pdf/2107.10833.pdf
+
+**Jiaheng Wei, Minghao Liu, Jiahao Luo, Andrew Zhu, James Davis, Yang Liu. DuelGAN: A Duel Between Two Discriminators Stabilizes the GAN Training:** https://arxiv.org/pdf/2101.07524.pdf
+
+**Shuo Li, Fang Liu, Zehua Hao, Licheng Jiao, Xu Liu, Yuwei Guo. MinEnt: Minimum entropy for self-supervised representation learning:** https://www.sciencedirect.com/science/article/abs/pii/S0031320323000651
 
 ## Further Reading
 
