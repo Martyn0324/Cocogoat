@@ -25,7 +25,7 @@ Real-ESRGAN also uses a UNet discriminator, something that is also used by OpenA
 
 Karras, in Progressive Grow, used a "pixel-wise normalization" technique. In my tests, this normalization technique contributed immensely to...collapse my model miserably. So I'll just stick to normal things.
 
-## Prototype
+~~## Prototype~~ - EDIT: This is actually done by PixelCNN...an architecture developed in 2016 by Google Deepmind. I didn't know about that until now: https://arxiv.org/pdf/1606.05328.pdf
 
 I've never seen any image generating GAN using LSTMs, so I decided to give it a chance. Perhaps LSTMs aren't used for images simply because it isn't worth it, but I'm still eager to give it a try and see it for myself.
 
