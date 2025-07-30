@@ -3,6 +3,25 @@ Progressive DCGAN created on Pytorch, based on many different codes. The only or
 
 The name Cocogoat it's because I've been testing this code initially using a dataset of 10.000 images of Ganyu from Genshin Impact.
 
+## EDIT: The Behavior of the DCGAN architecture -> Clinical Trials - TODO
+
+* Vanilla Configurations:
+	* Non-Conditional
+	* Generator and Discriminator with similar layers and parameters
+	* Initialization with low value parameters -> Normal (0, 0.02)
+	* Discriminator 1-D Classifier (Sigmoid)
+	* DropOut (0.25) in Discriminator --> **IMPORTANT: Applies Regularization**
+	* BatchNormalization Layers
+	* Learning rate = 2e-4 for both Gen and Discriminator
+		* Beta1 = 0.5 ; Beta2 = 0.99
+	* Loss = Binary Cross Entropy
+* Observations: Decent, stable training.
+	* **NOTE:** The first optimization steps *catapults* each model weights towards a direction of values. If this step is too aggressive, it causes the models to diverge. **CONSIDER EXPERIMENTS WITH ROBUST GANs TO CHECK THIS BEHAVIOR**
+       * This also justifies why it's mandatory to initialize weights with such low values. Also why not to zero the beta1 from Adam (which would cause the optimization to be too aggressive)
+
+<img width="1180" height="471" alt="DCGAN Explosive Start" src="https://github.com/user-attachments/assets/cb752324-995c-4f33-ad65-aa2184cdc625" />
+
+
 ## Creating dataset
 
 The file `DataAugmentator.ipynb` has a model and some functions to provide Data Augmentation. The model is used to basically select Ganyu's face on each image. In the DataAugmentation function, the same model is used in evaluation mode to extract Ganyu's face and resize that box so it has the same size as the other images in the dataset. Other functions are also included.
