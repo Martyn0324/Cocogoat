@@ -3,7 +3,7 @@ Progressive DCGAN created on Pytorch, based on many different codes. The only or
 
 The name Cocogoat it's because I've been testing this code initially using a dataset of 10.000 images of Ganyu from Genshin Impact.
 
-## EDIT: The Behavior of the DCGAN architecture -> Clinical Trials - TODO
+## UPDATE: The Behavior of the DCGAN architecture -> Clinical Trials - TODO
 
 * Vanilla Configurations:
 	* Non-Conditional
@@ -162,3 +162,5 @@ with Pure Synthetic Data:** https://arxiv.org/pdf/2107.10833.pdf
 **Singh, Vaibhav. An In-Depth Guide to Denoising Diffusion Probabilistic Models - From Theory to Implementation:** https://learnopencv.com/denoising-diffusion-probabilistic-models/#Mathematical-Details-Of-The-Forward-Diffusion-Process
 
 **Weng, Lilian. (Jul 2021). What are diffusion models? Lil’Log:** https://lilianweng.github.io/posts/2021-07-11-diffusion-models/.
+
+**Nick Huang, Aaron Gokaslan, Volodymyr Kuleshov, James Tompkin. The GAN is dead; Long Live the GAN!:** https://neurips.cc/virtual/2024/poster/95345
