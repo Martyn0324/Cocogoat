@@ -48,7 +48,7 @@ def _probe(path: str) -> int:
     return max(n, 0)
 
 
-def _decode_clip(args) -> tuple[int, int]:
+def _decode_clip(args) -> tuple[int, int, int]:
     (path, clip_idx, start, n_keep, stride, low_path, low_res, hr_path, hr_start, n_hr, hr_every, hr_res) = args
     import cv2
 
@@ -73,13 +73,14 @@ def _decode_clip(args) -> tuple[int, int]:
             kept += 1
         fidx += 1
     cap.release()
+    decoded = kept
     while kept < n_keep and last is not None:  # pad short clips by repeating the last frame
         low[start + kept] = last
         kept += 1
     low.flush()
     if hr is not None:
         hr.flush()
-    return clip_idx, hr_kept
+    return clip_idx, hr_kept, decoded
 
 
 def decode_clips(clips: list[Path], out_dir: str | Path, low_res: int = 256, stride: int = 4, frames_per_clip: int = 72,
@@ -109,10 +110,27 @@ def decode_clips(clips: list[Path], out_dir: str | Path, low_res: int = 256, str
         results = list(ex.map(_decode_clip, jobs))
     segments = np.repeat(np.arange(len(clips)), frames_per_clip)
     hr_clip = np.repeat(np.arange(len(clips)), n_hr_per)
-    # clips whose HR frames fell short keep zero frames: mark them invalid (-1)
-    for clip_idx, hr_kept in results:
-        if hr_kept < n_hr_per:
+    bad = []
+    for clip_idx, hr_kept, decoded in results:
+        if hr_kept < n_hr_per:  # HR slots that were never written: mark invalid (-1)
             hr_clip[clip_idx * n_hr_per + hr_kept:(clip_idx + 1) * n_hr_per] = -1
+        if decoded < 8:  # undecodable clip: drop it entirely
+            bad.append(clip_idx)
+    if bad:
+        keep_frames = ~np.isin(segments, bad)
+        keep_hr = ~np.isin(np.repeat(np.arange(len(clips)), n_hr_per), bad)
+        low_arr = np.load(low_path, mmap_mode="r")
+        hr_arr = np.load(hr_path, mmap_mode="r")
+        np.save(low_path.with_suffix(".tmp.npy"), low_arr[keep_frames])
+        np.save(hr_path.with_suffix(".tmp.npy"), hr_arr[keep_hr])
+        del low_arr, hr_arr
+        os.replace(low_path.with_suffix(".tmp.npy"), low_path)
+        os.replace(hr_path.with_suffix(".tmp.npy"), hr_path)
+        remap = {old: new for new, old in enumerate(c for c in range(len(clips)) if c not in set(bad))}
+        segments = np.array([remap[s_] for s_ in segments[keep_frames]])
+        hr_clip = np.array([remap.get(h, -1) if h >= 0 else -1 for h in hr_clip[keep_hr]])
+        clips = [c for i, c in enumerate(clips) if i not in set(bad)]
+        print(f"dropped {len(bad)} undecodable clips", flush=True)
     np.savez(meta_path, segments=segments, hr_clip=hr_clip, names=np.array([c.name for c in clips]))
     done.write_text(str(len(clips)))
     return np.load(low_path, mmap_mode="r"), segments, np.load(hr_path, mmap_mode="r"), hr_clip
