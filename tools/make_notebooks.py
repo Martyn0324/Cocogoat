@@ -85,6 +85,28 @@ from IPython.display import Markdown, display
 display(Markdown(open('/content/drive/MyDrive/Cocogoat/runs/probe/report.md').read()))""",
         ],
     ),
+
+    "01_task1_gan64.ipynb": notebook(
+        "Task 1: modern GAN at 64x64",
+        "R3GAN objective (RpGAN + R1 + R2) with normalization-free depthwise-separable blocks and self-attention, "
+        "trained on your Genshin fan-art set (`Complete_dataset.npy`, 45,935 images) with CLIP k-means pseudo-classes "
+        "(cluster-conditioned GAN) against mode collapse. Budget: ~3.5 h of training + ~10 min data prep + final eval. "
+        "Outputs: `MyDrive/Cocogoat/runs/task1/`.",
+        [
+            """# 4) GPU smoke test (tiny model, ~10 steps). The first run also converts the 11 GB float64 file into a
+#    1.4 GB uint8 cache (MyDrive/Cocogoat/cache) - a few minutes, reused by every later run.
+!python -m cocogoat.tasks.task1_gan64 --smoke --dataset genshin --run_dir /content/drive/MyDrive/Cocogoat/runs/task1_smoke --force""",
+            """# 5) Full training run (resumes automatically from MyDrive/Cocogoat/runs/task1/ckpt/latest.pt)
+!python -m cocogoat.tasks.task1_gan64 --dataset genshin --hours 3.5""",
+            """# 6) Results
+import json
+from IPython.display import Image, Markdown, display
+run = '/content/drive/MyDrive/Cocogoat/runs/task1'
+display(Markdown(open(f'{run}/report.md').read()))
+display(Image(f'{run}/samples/final.png'))
+display(Image(f'{run}/samples/final_per_class.png'))""",
+        ],
+    ),
 }
 
 

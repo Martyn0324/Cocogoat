@@ -44,15 +44,18 @@ def gaussian_stats(feats: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def frechet_distance(mu1, sigma1, mu2, sigma2) -> float:
-    from scipy import linalg
+    """||mu1-mu2||^2 + Tr(S1 + S2 - 2 (S1 S2)^{1/2}).
 
-    diff = mu1 - mu2
-    covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
-    if not np.isfinite(covmean).all():
-        offset = np.eye(sigma1.shape[0]) * 1e-6
-        covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
-    covmean = covmean.real
-    return float(diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * np.trace(covmean))
+    Tr((S1 S2)^{1/2}) is computed as the sum of square roots of the eigenvalues of
+    S1 S2 (which are real and non-negative for PSD S1, S2); this avoids
+    scipy.linalg.sqrtm, whose signature changed across SciPy versions.
+    """
+    diff = np.asarray(mu1, dtype=np.float64) - np.asarray(mu2, dtype=np.float64)
+    s1 = np.asarray(sigma1, dtype=np.float64)
+    s2 = np.asarray(sigma2, dtype=np.float64)
+    eig = np.linalg.eigvals(s1 @ s2)
+    tr_covmean = np.sqrt(eig.astype(np.complex128)).real.sum()
+    return float(diff.dot(diff) + np.trace(s1) + np.trace(s2) - 2.0 * tr_covmean)
 
 
 def kid(f_real: np.ndarray, f_fake: np.ndarray, n_subsets: int = 100, subset_size: int = 1000,

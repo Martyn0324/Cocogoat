@@ -105,7 +105,11 @@ def load_array_images(path: str | Path, key: str | None = None, cache_dir: str |
     target_dir = Path(cache_dir if cache_dir is not None else path.parent)
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / tag
-    shape, dtype, chunks = iter_array(path, key, chunk_items=chunk)
+    src, tmp_copy = path, None
+    if str(path).startswith("/content/drive") and cache_dir is not None:
+        # sequential copy from Drive FUSE is much faster than strided memmap reads
+        src = tmp_copy = localize(path, Path(cache_dir) / "_src")
+    shape, dtype, chunks = iter_array(src, key, chunk_items=chunk)
     n_items = int(np.prod(shape[:2])) if len(shape) == 5 else shape[0]
     out, i, value_range = None, 0, None
     for ch in chunks:
@@ -126,6 +130,8 @@ def load_array_images(path: str | Path, key: str | None = None, cache_dir: str |
     import os as _os
 
     _os.replace(target.with_suffix(".npy.part"), target)
+    if tmp_copy is not None:
+        tmp_copy.unlink(missing_ok=True)
     if drive_cache is not None:
         Path(drive_cache).mkdir(parents=True, exist_ok=True)
         shutil.copyfile(target, Path(drive_cache) / tag)
