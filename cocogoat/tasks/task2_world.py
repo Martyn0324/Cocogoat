@@ -246,7 +246,8 @@ def train_vae(cfg: Task2Config, train: ClipBank, test: ClipBank, device: torch.d
                 rec = vae(fixed, sample=False)[0].float()
             vae.train()
             pair = torch.stack([fixed, rec], 1).flatten(0, 1)  # alternate original / reconstruction
-            save_grid(pair, rd.path / "samples" / f"recon_{tag}.png", nrow=8)
+            save_grid(pair, rd.path / "samples" / f"recon_{tag}.png", nrow=8,
+                      col_labels=["real", "VAE recon"] * 4, legend=[("held-out frames: real | reconstruction", (255, 255, 255))])
 
         t_log = time.time()
         clock.start()
@@ -570,7 +571,16 @@ def evaluate_world_model(cfg: Task2Config, vae: VAE, wm: WorldModel, clips: torc
         ctx, gt, pr = strips[j:j + 3]
         rows += [torch.cat([ctx, gt]), torch.cat([ctx, pr])]
     if rows:
-        save_grid(torch.cat(rows[:8]), rd.path / "samples" / f"rollout_{tag}.png", nrow=c + h, max_side=8192)
+        GREEN, RED, GREY = (0, 170, 0), (220, 0, 0), (128, 128, 128)
+        n_rows = min(len(rows), 8)
+        step_lab = max(1, (c + h) // 16)
+        save_grid(torch.cat(rows[:n_rows]), rd.path / "samples" / f"rollout_{tag}.png", nrow=c + h, max_side=8192,
+                  row_labels=[f"clip {j // 2 + 1} {'real' if j % 2 == 0 else 'model'}" for j in range(n_rows)],
+                  col_labels=[(f"t{t - c + 1:+d}" if t >= c else f"t{t - c + 1}") if (t - c) % step_lab == 0 or t == 0
+                              else "" for t in range(c + h)],
+                  col_colors=[GREEN] * c + [RED] * h,
+                  legend=[(f"context: {c} real frames given to the model", GREEN),
+                          (f"future: {h} frames (row 'real' = ground truth, row 'model' = world-model rollout)", RED)])
     n_gif = min(cfg.gif_clips, len(rows) // 2)
     if n_gif:
         # one column per clip: top = real video, bottom = context + world-model rollout.
@@ -581,7 +591,10 @@ def evaluate_world_model(cfg: Task2Config, vae: VAE, wm: WorldModel, clips: torc
         colours[n_gif:, :c] = torch.tensor([0, 200, 0], dtype=torch.uint8)
         colours[n_gif:, c:] = torch.tensor([220, 0, 0], dtype=torch.uint8)
         save_video_gif(vids, rd.path / "samples" / f"rollout_{tag}.gif", nrow=n_gif, fps=cfg.gif_fps,
-                       borders=colours)
+                       borders=colours, row_labels=["real", "model"],
+                       captions=[f"frame {t + 1}/{c + h}: " + ("context" if t < c else f"generated +{t - c + 1}")
+                                 for t in range(c + h)],
+                       legend=[("real", (128, 128, 128)), ("context", (0, 200, 0)), ("generated", (220, 0, 0))])
     res["context"], res["horizon"] = c, h
     return res
 

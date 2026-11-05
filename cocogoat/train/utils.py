@@ -279,8 +279,61 @@ def to_uint8(x: torch.Tensor) -> torch.Tensor:
     return ((x.float().clamp(-1, 1) + 1) * 127.5).round().to(torch.uint8)
 
 
-def save_grid(images: torch.Tensor, path: str | Path, nrow: int = 8, max_side: int | None = None) -> None:
-    """Save an NCHW image batch in [-1, 1] as a PNG grid."""
+def _font(size: int):
+    from PIL import ImageFont
+
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # Pillow < 10.1: fixed-size bitmap font
+        return ImageFont.load_default()
+
+
+def annotate_grid(pil, tile_w: int, tile_h: int, ncol: int, row_labels: list[str] | None = None,
+                  col_labels: list[str] | None = None, col_colors: list[tuple] | None = None,
+                  legend: list[tuple[str, tuple]] | None = None):
+    """Add margins with labels to a grid image.
+
+    ``row_labels``: one per grid row (left margin). ``col_labels``: one per column ('' = none, top margin).
+    ``col_colors``: RGB per column, drawn as a bar above the column. ``legend``: (text, RGB) pairs on top.
+    """
+    from PIL import Image, ImageDraw
+
+    fs = max(10, min(18, tile_h // 4))
+    font = _font(fs)
+    left = 0
+    if row_labels:
+        left = max(int(ImageDraw.Draw(pil).textlength(t, font=font)) for t in row_labels) + 8
+    top = (fs + 6 if legend else 0) + (fs + 4 if col_labels else 0) + (6 if col_colors else 0)
+    out = Image.new("RGB", (pil.size[0] + left, pil.size[1] + top), (255, 255, 255))
+    out.paste(pil.convert("RGB"), (left, top))
+    d = ImageDraw.Draw(out)
+    y = 2
+    if legend:
+        x = left + 2
+        for text, colour in legend:
+            d.rectangle([x, y + 2, x + fs - 4, y + fs - 2], fill=tuple(colour))
+            x += fs
+            d.text((x, y), text, fill=(0, 0, 0), font=font)
+            x += int(d.textlength(text, font=font)) + fs
+        y += fs + 6
+    if col_labels:
+        for j, t in enumerate(col_labels[:ncol]):
+            if t:
+                d.text((left + j * tile_w + 2, y), t, fill=(0, 0, 0), font=font)
+        y += fs + 4
+    if col_colors:
+        for j, colour in enumerate(col_colors[:ncol]):
+            d.rectangle([left + j * tile_w, y, left + (j + 1) * tile_w - 1, y + 4], fill=tuple(colour))
+    if row_labels:
+        for i, t in enumerate(row_labels):
+            d.text((2, top + i * tile_h + max(0, (tile_h - fs) // 2)), t, fill=(0, 0, 0), font=font)
+    return out
+
+
+def save_grid(images: torch.Tensor, path: str | Path, nrow: int = 8, max_side: int | None = None,
+              row_labels: list[str] | None = None, col_labels: list[str] | None = None,
+              col_colors: list[tuple] | None = None, legend: list[tuple[str, tuple]] | None = None) -> None:
+    """Save an NCHW image batch in [-1, 1] as a PNG grid (optionally labelled, see ``annotate_grid``)."""
     from PIL import Image
 
     imgs = to_uint8(images).cpu()
@@ -295,6 +348,8 @@ def save_grid(images: torch.Tensor, path: str | Path, nrow: int = 8, max_side: i
     if arr.shape[2] == 1:
         arr = arr[:, :, 0]
     pil = Image.fromarray(arr)
+    if row_labels or col_labels or col_colors or legend:
+        pil = annotate_grid(pil, w, h, ncol, row_labels, col_labels, col_colors, legend)
     if max_side is not None and max(pil.size) > max_side:
         s = max_side / max(pil.size)
         pil = pil.resize((int(pil.size[0] * s), int(pil.size[1] * s)), Image.LANCZOS)
@@ -303,11 +358,15 @@ def save_grid(images: torch.Tensor, path: str | Path, nrow: int = 8, max_side: i
 
 
 def save_video_gif(videos: torch.Tensor, path: str | Path, nrow: int = 4, fps: float = 8.0,
-                   borders: torch.Tensor | None = None, border: int = 2, max_side: int = 1024) -> None:
+                   borders: torch.Tensor | None = None, border: int = 2, max_side: int = 1024,
+                   row_labels: list[str] | None = None, captions: list[str] | None = None,
+                   legend: list[tuple[str, tuple]] | None = None) -> None:
     """Save videos as one animated GIF in which every frame is a grid of the videos' frames.
 
     ``videos``: (N, T, C, H, W) in [-1, 1]. ``borders``: optional (N, T, 3) uint8 RGB colours of a
     ``border``-pixel frame drawn around each tile (e.g. to mark real vs generated frames).
+    ``row_labels``: one per grid row; ``captions``: one text per time step (e.g. "t=5 generated");
+    ``legend``: (text, RGB) pairs shown on top.
     """
     from PIL import Image
 
@@ -326,7 +385,15 @@ def save_video_gif(videos: torch.Tensor, path: str | Path, nrow: int = 4, fps: f
     for i in range(n):
         r, cc = divmod(i, ncol)
         grid[:, :, r * h:(r + 1) * h, cc * w:(cc + 1) * w] = v[i, :, :3]
-    frames = [Image.fromarray(f.permute(1, 2, 0).numpy()) for f in grid]
+    frames = []
+    for k, f in enumerate(grid):
+        pil = Image.fromarray(f.permute(1, 2, 0).numpy())
+        if row_labels or captions or legend:
+            leg = list(legend or [])
+            if captions:
+                leg = leg + [(captions[k], (255, 255, 255))]
+            pil = annotate_grid(pil, w, h, ncol, row_labels, None, None, leg or None)
+        frames.append(pil)
     side = max(frames[0].size)
     if side > max_side:
         s = max_side / side
