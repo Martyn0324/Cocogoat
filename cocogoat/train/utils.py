@@ -89,8 +89,13 @@ class EMA:
 
     @torch.no_grad()
     def update(self, model: torch.nn.Module, beta: float) -> None:
-        for p_ema, p in zip(self.model.parameters(), model.parameters()):
-            p_ema.lerp_(p.detach().to(p_ema.dtype), 1.0 - beta)
+        ema_p = list(self.model.parameters())
+        src_p = [p.detach() for p in model.parameters()]
+        if ema_p and all(a.dtype == b.dtype and a.device == b.device for a, b in zip(ema_p, src_p)):
+            torch._foreach_lerp_(ema_p, src_p, 1.0 - beta)  # one fused launch group instead of one per tensor
+        else:
+            for p_ema, p in zip(ema_p, src_p):
+                p_ema.lerp_(p.to(p_ema.dtype), 1.0 - beta)
         for b_ema, b in zip(self.model.buffers(), model.buffers()):
             b_ema.copy_(b)
 
