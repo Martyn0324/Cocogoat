@@ -115,6 +115,33 @@ display(Image(f'{run}/samples/final.png'))
 display(Image(f'{run}/samples/final_per_class.png'))""",
         ],
     ),
+
+    "02_task2_vae_world_model.ipynb": notebook(
+        "Task 2: VAE + latent world model (64x64 video)",
+        "Per-frame beta-VAE (ConvNeXt depthwise blocks, PixelUnshuffle with DC-AE shortcuts, bottleneck attention, "
+        "EQ-VAE regulariser, adversarial fine-tuning) + a space-time transformer world model with EMA memory that "
+        "predicts the next frame's latent. Two datasets: Colored Moving MNIST (controlled dynamics, the first rung of "
+        "your ViVAE curriculum) and your `Shelterdataset.npz`. Budget: ~1.5 h per dataset. "
+        "Outputs: `MyDrive/Cocogoat/runs/task2/<dataset>/{vae,wm}/`.",
+        [
+            """# 4) GPU smoke test (tiny models, a few steps)
+!python -m cocogoat.tasks.task2_world --smoke --dataset mmnist --run_root /content/drive/MyDrive/Cocogoat/runs/task2_smoke --force""",
+            """# 5) Colored Moving MNIST: VAE (45 min) then world model (45 min); resumes automatically
+!python -m cocogoat.tasks.task2_world --dataset mmnist""",
+            """# 6) Shelter (your anime music-video frames): VAE (45 min) then world model (45 min)
+!python -m cocogoat.tasks.task2_world --dataset shelter""",
+            """# 7) Results
+from IPython.display import Image, Markdown, display
+for ds in ['mmnist', 'shelter']:
+    run = f'/content/drive/MyDrive/Cocogoat/runs/task2/{ds}'
+    try:
+        display(Markdown(f'## {ds}\\n' + open(f'{run}/wm/report.md').read()))
+        display(Image(f'{run}/vae/samples/recon_final.png'))
+        display(Image(f'{run}/wm/samples/rollout_final.png'))
+    except FileNotFoundError as exc:
+        print(ds, 'not finished:', exc)""",
+        ],
+    ),
 }
 
 
