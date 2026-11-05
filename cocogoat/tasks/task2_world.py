@@ -574,7 +574,8 @@ def run(cfg: Task2Config) -> dict:
     with rd.capture_errors():
         rd.print(f"env: {describe_env()}")
         if cfg.dataset == "mmnist":
-            cfg.clip_len = max(cfg.clip_len, cfg.eval_context + cfg.eval_horizon) if cfg.smoke else cfg.clip_len
+            if cfg.smoke:  # training clips must fit in the (short) training sequences
+                cfg.clip_len = min(max(cfg.clip_len, cfg.eval_context + cfg.eval_horizon), cfg.mmnist_frames)
         train, test, info = load_banks(cfg, device, rd)
         rd.write_json("data_info.json", info)
         vae_path = root / "vae" / "vae.pt"
