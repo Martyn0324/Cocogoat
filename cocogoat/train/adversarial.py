@@ -1,5 +1,8 @@
 """Generic RpGAN + R1/R2 training step shared by every GAN in the project.
 
+``cond`` may be a single tensor or a dict {critic name: condition tensor} when critics see
+batches of different composition.
+
 A *critic* splits the discriminator into
     encode(sample) -> dict of tensors   (augmentation and/or frozen feature networks)
     head(encoded, cond) -> logits       (the trainable part)
@@ -95,9 +98,10 @@ class AdversarialTrainer:
             enc_r = _detach_dict(enc_r, do_reg)
             enc_f = _detach_dict(enc_f, do_reg and slot.r2)
             use_amp = self.amp and not (do_reg and self.reg_fp32)
+            cc = cond.get(slot.name) if isinstance(cond, dict) else cond
             with autocast(self.device, use_amp):
-                lr_ = critic.head(enc_r, cond)
-                lf_ = critic.head(enc_f, cond)
+                lr_ = critic.head(enc_r, cc)
+                lf_ = critic.head(enc_f, cc)
             loss = rpgan_d_loss(lr_, lf_)
             stats[f"{slot.name}/d_loss"] = loss.detach()
             stats[f"{slot.name}/gap"] = (lr_.detach().float() - lf_.detach().float()).mean()
@@ -127,10 +131,11 @@ class AdversarialTrainer:
             critic.fast = True
             for p in slot.params:
                 p.requires_grad_(False)
+            cc = cond.get(slot.name) if isinstance(cond, dict) else cond
             with autocast(self.device, self.amp):
                 with torch.no_grad():
-                    lr_ = critic.head(critic.encode(real), cond)
-                lf_ = critic.head(critic.encode(fake), cond)
+                    lr_ = critic.head(critic.encode(real), cc)
+                lf_ = critic.head(critic.encode(fake), cc)
             critic.fast = False
             lg = rpgan_g_loss(lr_, lf_)
             stats[f"{slot.name}/g_loss"] = lg.detach()

@@ -187,6 +187,27 @@ display(Image(f'{run}/eval/samples/prompts_grid.png'))
 display(Image(f'{run}/sr/samples/sr_final.png'))""",
         ],
     ),
+
+    "05_task5_world_gan_1024.ipynb": notebook(
+        "Task 5: latent world-GAN - images and videos at 1024x1024 (~10 h)",
+        "Inter4K (1,000 real 4K clips, 15 fps) downloaded on Colab. Per-frame beta-VAE at 256 px (1.5 h), then a "
+        "latent image generator + an adversarial world model trained jointly (5.5 h) with three critics (latent "
+        "frame, decoded frame, temporal window), then a x4 SR GAN on native 1024 crops (2 h). One system, two "
+        "modes: world model OFF -> 1024 px images, ON -> 1024 px videos (mp4 + GIF). Text prompts work through CLIP. "
+        "Outputs: `MyDrive/Cocogoat/runs/task5/`.",
+        [
+            """# 4) GPU smoke test (tiny models on synthetic clips)
+!python -m cocogoat.tasks.task5_world_gan --smoke --run_dir /content/drive/MyDrive/Cocogoat/runs/task5_smoke --force""",
+            """# 5) Data (~15-25 min), VAE (1.5 h), world-GAN (5.5 h), SR (2 h), evaluation + videos. Resumes automatically.
+!python -m cocogoat.tasks.task5_world_gan""",
+            """# 6) Results
+from IPython.display import Image, Markdown, Video, display
+run = '/content/drive/MyDrive/Cocogoat/runs/task5'
+display(Markdown(open(f'{run}/eval/report.md').read()))
+display(Image(f'{run}/eval/samples/prompts_images.png'))
+display(Image(f'{run}/eval/videos/prompt0.gif'))""",
+        ],
+    ),
 }
 
 
