@@ -37,7 +37,7 @@ from cocogoat.data.video import (
 from cocogoat.losses import rpgan_g_loss
 from cocogoat.metrics.video import psnr, ssim
 from cocogoat.models.gan2d import Discriminator, DiscriminatorConfig
-from cocogoat.models.vae import VAE, VAEConfig, kl_divergence
+from cocogoat.models.vae import VAE, VAEConfig, frames_per_pass, kl_divergence
 from cocogoat.models.world import WorldModel, WorldModelConfig
 from cocogoat.nn import count_params
 from cocogoat.tasks.common import (
@@ -320,10 +320,11 @@ def evaluate_vae(cfg: Task2Config, vae: VAE, test: ClipBank, device: torch.devic
 
     lp = LPIPSMetric(device, random_weights=cfg.metrics == "random")
     n = min(len(test), 10000 if not cfg.smoke else 32)
+    bs = min(256, frames_per_pass(cfg.resolution, cfg.resolution))  # 256 frames at 64 px, 32 at 256 px
     ps, ss, ls = [], [], []
     recs = []
-    for i in range(0, n, 256):
-        x = ClipBank.to_float(test.frames[i:min(i + 256, n)])
+    for i in range(0, n, bs):
+        x = ClipBank.to_float(test.frames[i:min(i + bs, n)])
         with autocast(device, cfg.amp):
             r = vae(x, sample=False)[0].float().clamp(-1, 1)
         ps.append(psnr(r, x))

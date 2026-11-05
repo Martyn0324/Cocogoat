@@ -81,3 +81,37 @@ def test_latent_generator_residual_identity_and_conditioning():
     z = torch.randn(5, 4, 4, 4)
     out = g(z, torch.randn(5, 8), torch.randint(0, 3, (5,)))
     assert out.shape == z.shape and torch.allclose(out, z)  # zero-init output => z' = z at init
+
+
+def test_bulk_vae_passes_are_sized_by_pixels(monkeypatch):
+    """No-grad bulk encode/decode must be split by pixel count: frame counts tuned for 64x64 run out of
+    GPU memory at 256x256 (Task 5: 512 frames in one encoder pass -> a 32 GiB activation)."""
+    import cocogoat.models.vae as vae_mod
+
+    monkeypatch.setattr(vae_mod, "BULK_PIXELS", 8 * 32 * 32)          # => 8 frames per pass at 32x32
+    torch.manual_seed(0)
+    vae = VAE(VAEConfig(channels=(8, 8, 8, 8), blocks=(1, 1, 1, 1), mid_blocks=1, heads=2, expansion=2.0)).eval()
+    seen = {"enc": [], "dec": []}
+    vae.encoder.register_forward_pre_hook(lambda m, a: seen["enc"].append(a[0].shape[0]))
+    vae.decoder.register_forward_pre_hook(lambda m, a: seen["dec"].append(a[0].shape[0]))
+    x = torch.randn(20, 3, 32, 32)
+
+    with torch.no_grad():
+        ref_mean = vae.encode(x)[0]                                     # one pass, for reference
+    seen["enc"].clear()
+    vae.fit_latent_stats([x])
+    assert max(seen["enc"]) <= 8
+    assert torch.allclose(vae.latent_mean, ref_mean.double().mean(dim=(0, 2, 3)).float(), atol=1e-5)
+
+    seen["enc"].clear()
+    zn = vae.encode_normalized(x)
+    assert max(seen["enc"]) <= 8 and zn.shape == (20, 16, 4, 4)
+    assert torch.allclose(zn, vae.normalize(ref_mean), atol=1e-5)
+
+    with torch.no_grad():
+        out = vae.decode_normalized(zn)
+    assert max(seen["dec"]) <= 8 and out.shape == (20, 3, 32, 32)
+    seen["dec"].clear()
+    zg = zn.clone().requires_grad_(True)                               # training path: one pass, graph intact
+    vae.decode_normalized(zg).mean().backward()
+    assert seen["dec"] == [20] and zg.grad is not None

@@ -24,6 +24,17 @@ import torch.nn.functional as F
 from cocogoat.nn import ConvNeXtBlock, LayerNorm2d, ResidualDown, ResidualUp, SelfAttention2d
 
 
+# Bulk no-grad encode/decode passes (latent statistics, evaluation, encoding whole clips) are split so that one
+# pass holds at most this many pixels: 512 frames at 64x64 (unchanged), 32 frames at 256x256. A fixed frame
+# count tuned for 64x64 needs 16x the memory at 256x256 (Task 5: a 32 GiB activation per layer, OOM).
+BULK_PIXELS = 512 * 64 * 64
+
+
+def frames_per_pass(height: int, width: int) -> int:
+    """Frames per bulk VAE pass at this (output) resolution."""
+    return max(1, BULK_PIXELS // (height * width))
+
+
 @dataclass
 class VAEConfig:
     in_channels: int = 3
@@ -148,21 +159,28 @@ class VAE(nn.Module):
 
     @torch.no_grad()
     def encode_normalized(self, x: torch.Tensor, sample: bool = False) -> torch.Tensor:
-        mean, logvar = self.encode(x)
-        z = self.reparameterize(mean, logvar) if sample else mean
-        return self.normalize(z)
+        out = []
+        for xc in x.split(frames_per_pass(*x.shape[-2:])):
+            mean, logvar = self.encode(xc)
+            out.append(self.normalize(self.reparameterize(mean, logvar) if sample else mean))
+        return torch.cat(out)
 
     def decode_normalized(self, zn: torch.Tensor) -> torch.Tensor:
-        return self.decode(self.denormalize(zn))
+        if torch.is_grad_enabled():  # training: one pass (the activations are kept for backward anyway)
+            return self.decode(self.denormalize(zn))
+        f = self.cfg.downsample
+        k = frames_per_pass(zn.shape[-2] * f, zn.shape[-1] * f)
+        return torch.cat([self.decode(self.denormalize(zc)) for zc in zn.split(k)])
 
     @torch.no_grad()
     def fit_latent_stats(self, batches) -> None:
         s, s2, n = 0.0, 0.0, 0
         for x in batches:
-            mean, _ = self.encode(x)
-            s = s + mean.double().sum(dim=(0, 2, 3))
-            s2 = s2 + mean.double().square().sum(dim=(0, 2, 3))
-            n += mean.shape[0] * mean.shape[2] * mean.shape[3]
+            for xc in x.split(frames_per_pass(*x.shape[-2:])):
+                mean, _ = self.encode(xc)
+                s = s + mean.double().sum(dim=(0, 2, 3))
+                s2 = s2 + mean.double().square().sum(dim=(0, 2, 3))
+                n += mean.shape[0] * mean.shape[2] * mean.shape[3]
         mu = s / n
         std = (s2 / n - mu.square()).clamp_min(1e-12).sqrt()
         self.latent_mean.copy_(mu.float())
