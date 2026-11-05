@@ -34,6 +34,17 @@ from cocogoat.nn import (
 )
 
 
+def _expansion(e, r: int) -> float:
+    """Expansion ratio for resolution r: a float, or {res: ratio} (nearest key in log2, ties -> larger)."""
+    if isinstance(e, dict):
+        e = {int(k): v for k, v in e.items()}
+        if r in e:
+            return e[r]
+        key = min(e, key=lambda k: (abs(math.log2(k) - math.log2(r)), -k))
+        return e[key]
+    return e
+
+
 def _default_channels(resolution: int, top: int = 512, bottom: int = 128) -> dict[int, int]:
     """512 channels at <=8 px, halving towards the output, floored at ``bottom``."""
     chans = {}
@@ -58,7 +69,7 @@ class GeneratorConfig:
     blocks: int = 2
     attn_res: tuple[int, ...] = (16,)
     heads: int = 4
-    expansion: float = 3.0
+    expansion: float | dict = 3.0       # or {resolution: expansion}
     kernel: int = 3
     mapping_layers: int = 2
     out_channels: int = 3
@@ -76,7 +87,7 @@ class DiscriminatorConfig:
     blocks: int = 2
     attn_res: tuple[int, ...] = (16, 8)
     heads: int = 4
-    expansion: float = 3.0
+    expansion: float | dict = 3.0       # or {resolution: expansion}
     kernel: int = 3
     mbstd_group: int = 4
     in_channels: int = 3
@@ -105,7 +116,8 @@ class Generator(nn.Module):
             if r > 4:
                 self.ups[str(r)] = UpStage(prev, c)
             self.blocks[str(r)] = nn.ModuleList(
-                [InvertedBottleneck(c, cfg.expansion, cfg.kernel, cond_dim=cfg.w_dim) for _ in range(cfg.blocks)])
+                [InvertedBottleneck(c, _expansion(cfg.expansion, r), cfg.kernel, cond_dim=cfg.w_dim)
+                 for _ in range(cfg.blocks)])
             if r in cfg.attn_res:
                 self.attn[str(r)] = SelfAttention2d(c, cfg.heads, cond_dim=cfg.w_dim)
             prev = c
@@ -150,7 +162,7 @@ class Discriminator(nn.Module):
         for r in res_desc:
             c = chans[r]
             self.blocks[str(r)] = nn.ModuleList(
-                [InvertedBottleneck(c, cfg.expansion, cfg.kernel) for _ in range(cfg.blocks)])
+                [InvertedBottleneck(c, _expansion(cfg.expansion, r), cfg.kernel) for _ in range(cfg.blocks)])
             if r in cfg.attn_res:
                 self.attn[str(r)] = SelfAttention2d(c, cfg.heads, double_backward_safe=True)
             if r > 4:

@@ -63,7 +63,7 @@ from cocogoat.train import (
     set_rng_state,
     setup_torch,
 )
-from cocogoat.train.adversarial import AdversarialTrainer, Critic, CriticSlot, make_adam
+from cocogoat.train.adversarial import AdversarialTrainer, Critic, CriticSlot, make_adam, maybe_compile, to_floats
 
 
 def _vae_stage_defaults() -> Task2Config:
@@ -102,7 +102,9 @@ class Task3Config:
     aug_policy: str = "color,translation,cutout"
     lat_aug_policy: str = "translation"
     reg_every: int = 4
+    reg_fp32: bool = False
     amp: bool = True
+    compile: bool = True
     log_every: int = 100
     sample_minutes: float = 15.0
     eval_minutes: float = 45.0
@@ -132,6 +134,7 @@ def smoke_config(cfg: Task3Config) -> Task3Config:
     cfg.eval_n = cfg.final_eval_n = 64
     cfg.metrics = "random"
     cfg.amp = False
+    cfg.compile = False
     return cfg
 
 
@@ -143,12 +146,17 @@ class LatentCritic(Critic):
         self.D = D
         self.policy = policy
         self.p = p
+        object.__setattr__(self, "D_fast", None)
+
+    def set_fast(self, module) -> None:
+        object.__setattr__(self, "D_fast", module)
 
     def encode(self, sample):
         return {"lat": diff_augment(sample["lat"], self.policy, self.p)}
 
     def head(self, enc, cond):
-        return self.D(enc["lat"], cond)
+        net = self.D_fast if (self.fast and self.D_fast is not None) else self.D
+        return net(enc["lat"], cond)
 
 
 def run(cfg: Task3Config) -> dict:
@@ -236,7 +244,12 @@ def train_latent_gan(cfg: Task3Config, vae_path: Path, images: np.ndarray, label
         crit_lat = LatentCritic(D_lat, cfg.lat_aug_policy, cfg.aug_p[0])
         slot_img = CriticSlot("img", crit_img, opt_Di, g_weight=1.0, gamma=cfg.gamma_img[0])
         slot_lat = CriticSlot("lat", crit_lat, opt_Dl, g_weight=cfg.lat_weight, gamma=cfg.gamma_lat[0])
-        trainer = AdversarialTrainer([slot_img, slot_lat], device, amp=cfg.amp, reg_every=cfg.reg_every)
+        trainer = AdversarialTrainer([slot_img, slot_lat], device, amp=cfg.amp, reg_every=cfg.reg_every,
+                                     reg_fp32=cfg.reg_fp32)
+        G_fast = maybe_compile(G, cfg.compile)
+        crit_img.set_fast(maybe_compile(D_img, cfg.compile))
+        crit_lat.set_fast(maybe_compile(D_lat, cfg.compile))
+        compiled = G_fast is not None
 
         step, nimg, best_fid, elapsed = 0, 0, float("inf"), 0.0
         st = rd.load_checkpoint()
@@ -325,6 +338,30 @@ def train_latent_gan(cfg: Task3Config, vae_path: Path, images: np.ndarray, label
             save_grid(decode(zr).float().clamp(-1, 1), rd.path / "samples" / "decoded_real.png")
         save_grid(img_bank[:64].float() / 127.5 - 1, rd.path / "samples" / "real.png")
 
+        def train_step(g_net, ot_w):
+            # ---- critics ----
+            z_real, c = sample_real(cfg.batch)
+            with torch.no_grad(), autocast(device, cfg.amp):
+                x_real = decode(z_real).float()
+                z_fake, _ = generate(g_net, cfg.batch, c)
+                x_fake = decode(z_fake).float()
+            d_stats = trainer.d_step({"img": x_real, "lat": z_real}, {"img": x_fake, "lat": z_fake.float()}, c, step)
+            # ---- generator ----
+            z_real, c = sample_real(cfg.batch)
+            with torch.no_grad(), autocast(device, cfg.amp):
+                x_real = decode(z_real).float()
+            with autocast(device, cfg.amp):
+                z_fake, z_in = generate(g_net, cfg.batch, c)
+                x_fake = decode(z_fake)
+            adv, g_stats = trainer.g_adversarial_loss({"img": x_real, "lat": z_real},
+                                                      {"img": x_fake.float(), "lat": z_fake.float()}, c)
+            ot = (z_fake.float() - z_in).square().mean()
+            loss = adv + ot_w * ot
+            opt_G.zero_grad(set_to_none=True)
+            loss.backward()
+            opt_G.step()
+            return d_stats, g_stats, z_fake.detach(), z_real, ot.detach()
+
         budget = cfg.hours * 3600
         clock = TrainClock(elapsed)
         sample_timer, eval_timer, ckpt_timer = Every(cfg.sample_minutes * 60), Every(cfg.eval_minutes * 60), \
@@ -344,29 +381,17 @@ def train_latent_gan(cfg: Task3Config, vae_path: Path, images: np.ndarray, label
             for opt in (opt_G, opt_Di, opt_Dl):
                 set_optimizer_hparams(opt, lr=lr, beta2=beta2)
 
-            # ---- critics ----
-            z_real, c = sample_real(cfg.batch)
-            with torch.no_grad(), autocast(device, cfg.amp):
-                x_real = decode(z_real).float()
-                z_fake, _ = generate(G, cfg.batch, c)
-                x_fake = decode(z_fake).float()
-            d_stats = trainer.d_step({"img": x_real, "lat": z_real}, {"img": x_fake, "lat": z_fake.float()}, c, step)
-
-            # ---- generator ----
-            z_real, c = sample_real(cfg.batch)
-            with torch.no_grad(), autocast(device, cfg.amp):
-                x_real = decode(z_real).float()
-            with autocast(device, cfg.amp):
-                z_fake, z_in = generate(G, cfg.batch, c)
-                x_fake = decode(z_fake)
-            adv, g_stats = trainer.g_adversarial_loss({"img": x_real, "lat": z_real},
-                                                      {"img": x_fake.float(), "lat": z_fake.float()}, c)
-            ot = (z_fake.float() - z_in).square().mean()
-            loss = adv + ot_w * ot
-            opt_G.zero_grad(set_to_none=True)
-            if torch.isfinite(loss):
-                loss.backward()
-                opt_G.step()
+            try:
+                d_stats, g_stats, z_fake, z_real, ot = train_step(G_fast if G_fast is not None else G, ot_w)
+            except Exception as exc:  # noqa: BLE001
+                if compiled and step < 5:
+                    rd.print(f"torch.compile failed ({type(exc).__name__}: {str(exc)[:300]}); using eager mode")
+                    torch._dynamo.reset()
+                    G_fast, compiled = None, False
+                    crit_img.set_fast(None)
+                    crit_lat.set_fast(None)
+                    continue
+                raise
             nimg += cfg.batch
             step += 1
             G_ema.update(G, ema_beta(cfg.batch, cosine_interp(*cfg.ema_kimg, progress), nimg))
@@ -380,7 +405,7 @@ def train_latent_gan(cfg: Task3Config, vae_path: Path, images: np.ndarray, label
                                  "real_lat_std": float(z_real.std()),
                                  "fake_batch_div": float(torch.pdist(zf.flatten(1)[:64]).mean()),
                                  "real_batch_div": float(torch.pdist(z_real.flatten(1)[:64]).mean())}
-                stats = {**d_stats, **g_stats, **lat_stats, "ot": float(ot), "ot_w": ot_w, "lr": lr,
+                stats = {**to_floats(d_stats), **to_floats(g_stats), **lat_stats, "ot": float(ot), "ot_w": ot_w, "lr": lr,
                          "gamma_img": slot_img.gamma, "gamma_lat": slot_lat.gamma, "aug_p": crit_img.p,
                          "it_per_s": n_log / max(dt, 1e-9)}
                 rd.log_metrics(kind="train", step=step, kimg=nimg / 1000, hours=clock.now() / 3600, **stats)

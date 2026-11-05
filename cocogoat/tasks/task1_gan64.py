@@ -60,7 +60,11 @@ from cocogoat.train import (
     set_rng_state,
     setup_torch,
 )
-from cocogoat.train.adversarial import AdversarialTrainer, Critic, CriticSlot, make_adam
+from cocogoat.train.adversarial import AdversarialTrainer, Critic, CriticSlot, make_adam, maybe_compile, to_floats
+
+
+# expansion ratio per resolution: the inverted bottlenecks at 64/32 px dominate memory traffic
+LIGHT_HIGH_RES = {64: 2.0, 32: 2.0, 16: 3.0, 8: 3.0, 4: 3.0}
 
 
 @dataclass
@@ -83,11 +87,13 @@ class Task1Config:
     aug_p: tuple = (0.2, 0.6)
     aug_policy: str = "color,translation,cutout"
     reg_every: int = 4
+    reg_fp32: bool = False              # R1/R2 passes in bf16 (fp32 is ~2x slower)
     xflip: bool = True
     amp: bool = True
     channels_last: bool = True
-    G: GeneratorConfig = field(default_factory=GeneratorConfig)
-    D: DiscriminatorConfig = field(default_factory=DiscriminatorConfig)
+    compile: bool = True                # torch.compile G and D for the non-regularisation passes
+    G: GeneratorConfig = field(default_factory=lambda: GeneratorConfig(expansion=dict(LIGHT_HIGH_RES)))
+    D: DiscriminatorConfig = field(default_factory=lambda: DiscriminatorConfig(expansion=dict(LIGHT_HIGH_RES)))
     log_every: int = 100
     sample_minutes: float = 15.0
     eval_minutes: float = 45.0
@@ -117,6 +123,7 @@ def smoke_config(cfg: Task1Config) -> Task1Config:
     cfg.metrics = "random"
     cfg.amp = False
     cfg.channels_last = False
+    cfg.compile = False
     return cfg
 
 
@@ -128,12 +135,17 @@ class PixelCritic(Critic):
         self.D = D
         self.policy = policy
         self.p = p
+        object.__setattr__(self, "D_fast", None)  # compiled view (not registered as a submodule)
+
+    def set_fast(self, module) -> None:
+        object.__setattr__(self, "D_fast", module)
 
     def encode(self, sample):
         return {"img": diff_augment(sample["img"], self.policy, self.p)}
 
     def head(self, enc, cond):
-        return self.D(enc["img"], cond)
+        net = self.D_fast if (self.fast and self.D_fast is not None) else self.D
+        return net(enc["img"], cond)
 
 
 # --------------------------------------------------------------------------------------
@@ -216,7 +228,12 @@ def run(cfg: Task1Config) -> dict:
         opt_D = make_adam(D.parameters(), cfg.lr[0], cfg.beta2[0])
         critic = PixelCritic(D, cfg.aug_policy, cfg.aug_p[0])
         slot = CriticSlot("img", critic, opt_D, g_weight=1.0, gamma=cfg.gamma[0])
-        trainer = AdversarialTrainer([slot], device, amp=cfg.amp, reg_every=cfg.reg_every)
+        trainer = AdversarialTrainer([slot], device, amp=cfg.amp, reg_every=cfg.reg_every, reg_fp32=cfg.reg_fp32)
+        G_fast = maybe_compile(G, cfg.compile)
+        critic.set_fast(maybe_compile(D, cfg.compile))
+        compiled = G_fast is not None
+        if compiled:
+            rd.print("torch.compile enabled for G and D (first steps include compilation)")
 
         step, nimg, best_fid, elapsed = 0, 0, float("inf"), 0.0
         state = rd.load_checkpoint()
@@ -280,6 +297,24 @@ def run(cfg: Task1Config) -> dict:
                             "num_classes": num_classes}, rd.path / "ckpt" / "best_G_ema.pt")
             return m
 
+        def train_step(g_net):
+            # ---- discriminator step ----
+            x_real, c = bank.sample(cfg.batch)
+            z = torch.randn(cfg.batch, cfg.G.z_dim, device=device)
+            with torch.no_grad(), autocast(device, cfg.amp):
+                x_fake = g_net(z, c)
+            d_stats = trainer.d_step({"img": x_real}, {"img": x_fake}, c, step)
+            # ---- generator step ----
+            x_real, c = bank.sample(cfg.batch)
+            z = torch.randn(cfg.batch, cfg.G.z_dim, device=device)
+            with autocast(device, cfg.amp):
+                x_fake = g_net(z, c)
+            g_loss, g_stats = trainer.g_adversarial_loss({"img": x_real}, {"img": x_fake}, c)
+            opt_G.zero_grad(set_to_none=True)
+            g_loss.backward()
+            opt_G.step()
+            return d_stats, g_stats
+
         budget = cfg.hours * 3600
         clock = TrainClock(elapsed)
         sample_timer, eval_timer, ckpt_timer = Every(cfg.sample_minutes * 60), Every(cfg.eval_minutes * 60), \
@@ -299,28 +334,16 @@ def run(cfg: Task1Config) -> dict:
             for opt in (opt_G, opt_D):
                 set_optimizer_hparams(opt, lr=lr, beta2=beta2)
 
-            # ---- discriminator step ----
-            x_real, c = bank.sample(cfg.batch)
-            z = torch.randn(cfg.batch, cfg.G.z_dim, device=device)
-            with torch.no_grad(), autocast(device, cfg.amp):
-                x_fake = G(z, c)
-            d_stats = trainer.d_step({"img": x_real}, {"img": x_fake}, c, step)
-
-            # ---- generator step ----
-            x_real, c = bank.sample(cfg.batch)
-            z = torch.randn(cfg.batch, cfg.G.z_dim, device=device)
-            with autocast(device, cfg.amp):
-                x_fake = G(z, c)
-            g_loss, g_stats = trainer.g_adversarial_loss({"img": x_real}, {"img": x_fake}, c)
-            opt_G.zero_grad(set_to_none=True)
-            if torch.isfinite(g_loss):
-                g_loss.backward()
-                opt_G.step()
-                nonfinite_streak = 0
-            else:
-                nonfinite_streak += 1
-                if nonfinite_streak > 50:
-                    raise FloatingPointError("generator loss non-finite for 50 consecutive steps")
+            try:
+                d_stats, g_stats = train_step(G_fast if G_fast is not None else G)
+            except Exception as exc:  # noqa: BLE001
+                if compiled and step < 5:
+                    rd.print(f"torch.compile failed ({type(exc).__name__}: {str(exc)[:300]}); using eager mode")
+                    torch._dynamo.reset()
+                    G_fast, compiled = None, False
+                    critic.set_fast(None)
+                    continue
+                raise
 
             nimg += cfg.batch
             step += 1
@@ -329,8 +352,16 @@ def run(cfg: Task1Config) -> dict:
 
             if step % cfg.log_every == 0:
                 dt = time.time() - t_log
-                stats = {**d_stats, **g_stats, "lr": lr, "beta2": beta2, "gamma": slot.gamma, "aug_p": critic.p,
-                         "it_per_s": n_log / max(dt, 1e-9), "img_per_s": n_log * cfg.batch / max(dt, 1e-9)}
+                stats = {**to_floats(d_stats), **to_floats(g_stats), "lr": lr, "beta2": beta2, "gamma": slot.gamma,
+                         "aug_p": critic.p, "it_per_s": n_log / max(dt, 1e-9),
+                         "img_per_s": n_log * cfg.batch / max(dt, 1e-9)}
+                if not all(math.isfinite(v) for v in stats.values()):
+                    nonfinite_streak += 1
+                    rd.print(f"non-finite training statistics at step {step}: {stats}")
+                    if nonfinite_streak >= 3:
+                        raise FloatingPointError("training diverged (non-finite losses); resume from last checkpoint")
+                else:
+                    nonfinite_streak = 0
                 rd.log_metrics(kind="train", step=step, kimg=nimg / 1000, hours=clock.now() / 3600, **stats)
                 rd.write_status(step=step, kimg=nimg / 1000, hours=clock.now() / 3600, budget_hours=cfg.hours,
                                 progress=progress, best_fid=best_fid, **stats)

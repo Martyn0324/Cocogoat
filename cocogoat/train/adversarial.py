@@ -25,9 +25,15 @@ from cocogoat.train.utils import autocast
 
 
 class Critic(nn.Module):
-    """Base class. Subclasses implement ``head`` and optionally ``encode``."""
+    """Base class. Subclasses implement ``head`` and optionally ``encode``.
+
+    ``fast`` is toggled by the trainer: True for ordinary passes (a torch.compile'd copy of
+    the discriminator may be used), False for R1/R2 passes, which need double backward and
+    therefore run the eager module.
+    """
 
     keys: tuple[str, ...] = ("img",)
+    fast: bool = False
 
     def encode(self, sample: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         return {k: sample[k] for k in self.keys}
@@ -60,13 +66,11 @@ def _detach_dict(d: dict[str, torch.Tensor], requires_grad: bool) -> dict[str, t
     return out
 
 
-def _finite(x: torch.Tensor) -> bool:
-    return bool(torch.isfinite(x).all())
-
-
 class AdversarialTrainer:
+    """Stats are returned as detached 0-dim tensors (no GPU sync); convert them at log time."""
+
     def __init__(self, critics: list[CriticSlot], device: torch.device, amp: bool = True, reg_every: int = 4,
-                 reg_fp32: bool = True):
+                 reg_fp32: bool = False):
         self.critics = critics
         self.device = device
         self.amp = amp
@@ -79,9 +83,10 @@ class AdversarialTrainer:
     def d_step(self, real: dict[str, torch.Tensor], fake: dict[str, torch.Tensor], cond: torch.Tensor | None,
                step: int) -> dict[str, float]:
         do_reg = step % self.reg_every == 0
-        stats: dict[str, float] = {}
+        stats: dict[str, torch.Tensor] = {}
         for slot in self.critics:
             critic = slot.critic
+            critic.fast = not do_reg
             for p in slot.params:
                 p.requires_grad_(True)
             with torch.no_grad(), autocast(self.device, self.amp):
@@ -94,24 +99,21 @@ class AdversarialTrainer:
                 lr_ = critic.head(enc_r, cond)
                 lf_ = critic.head(enc_f, cond)
             loss = rpgan_d_loss(lr_, lf_)
-            stats[f"{slot.name}/d_loss"] = float(loss.detach())
-            stats[f"{slot.name}/gap"] = float((lr_.detach().float() - lf_.detach().float()).mean())
+            stats[f"{slot.name}/d_loss"] = loss.detach()
+            stats[f"{slot.name}/gap"] = (lr_.detach().float() - lf_.detach().float()).mean()
             if do_reg:
                 r1 = gradient_penalty(lr_, list(enc_r.values())).mean()
                 reg = r1
-                stats[f"{slot.name}/r1"] = float(r1.detach())
+                stats[f"{slot.name}/r1"] = r1.detach()
                 if slot.r2:
                     r2 = gradient_penalty(lf_, list(enc_f.values())).mean()
                     reg = reg + r2
-                    stats[f"{slot.name}/r2"] = float(r2.detach())
+                    stats[f"{slot.name}/r2"] = r2.detach()
                 loss = loss + (slot.gamma / 2.0) * self.reg_every * reg
-            if not _finite(loss):
-                stats[f"{slot.name}/nonfinite"] = 1.0
-                slot.opt.zero_grad(set_to_none=True)
-                continue
             slot.opt.zero_grad(set_to_none=True)
             loss.backward()
             slot.opt.step()
+            critic.fast = False
         return stats
 
     # ----------------------------------------------------------------------------------
@@ -119,23 +121,44 @@ class AdversarialTrainer:
                            cond: torch.Tensor | None) -> tuple[torch.Tensor, dict[str, float]]:
         """Sum of weighted RpGAN generator losses over critics (critic params frozen)."""
         total = torch.zeros((), device=self.device)
-        stats: dict[str, float] = {}
+        stats: dict[str, torch.Tensor] = {}
         for slot in self.critics:
             critic = slot.critic
+            critic.fast = True
             for p in slot.params:
                 p.requires_grad_(False)
             with autocast(self.device, self.amp):
                 with torch.no_grad():
                     lr_ = critic.head(critic.encode(real), cond)
                 lf_ = critic.head(critic.encode(fake), cond)
+            critic.fast = False
             lg = rpgan_g_loss(lr_, lf_)
-            stats[f"{slot.name}/g_loss"] = float(lg.detach())
+            stats[f"{slot.name}/g_loss"] = lg.detach()
             total = total + slot.g_weight * lg
         return total, stats
 
 
 def make_adam(params, lr: float, beta2: float, beta1: float = 0.0, eps: float = 1e-8) -> torch.optim.Optimizer:
     return torch.optim.Adam(params, lr=lr, betas=(beta1, beta2), eps=eps)
+
+
+def to_floats(stats: dict) -> dict:
+    """Convert a stats dict of 0-dim tensors / numbers to Python floats (one sync)."""
+    out = {}
+    for k, v in stats.items():
+        out[k] = float(v.detach().float()) if torch.is_tensor(v) else v
+    return out
+
+
+def maybe_compile(module: nn.Module, enabled: bool) -> nn.Module | None:
+    """torch.compile'd view of ``module`` (sharing its parameters), or None."""
+    if not enabled or not torch.cuda.is_available():
+        return None
+    try:
+        return torch.compile(module, dynamic=False)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[warn] torch.compile unavailable: {exc}")
+        return None
 
 
 ScheduleFn = Callable[[float], float]
