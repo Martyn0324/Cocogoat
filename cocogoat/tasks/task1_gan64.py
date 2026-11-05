@@ -88,7 +88,7 @@ class Task1Config:
     ema_kimg: tuple = (10.0, 300.0)
     aug_p: tuple = (0.2, 0.6)
     aug_policy: str = "color,translation,cutout"
-    reg_every: int = 4
+    reg_every: int = 8
     reg_fp32: bool = False              # R1/R2 passes in bf16 (fp32 is ~2x slower)
     xflip: bool = True
     amp: bool = True
@@ -230,6 +230,8 @@ def run(cfg: Task1Config) -> dict:
         critic = PixelCritic(D, cfg.aug_policy, cfg.aug_p[0])
         slot = CriticSlot("img", critic, opt_D, g_weight=1.0, gamma=cfg.gamma[0])
         trainer = AdversarialTrainer([slot], device, amp=cfg.amp, reg_every=cfg.reg_every, reg_fp32=cfg.reg_fp32)
+        rd.print(f"R1/R2 depthwise implementation: {'shift' if trainer.shift_for_reg else 'native'} "
+                 f"(benchmark ms: {trainer.shift_timings})")
         G_fast = maybe_compile(G, cfg.compile)
         critic.set_fast(maybe_compile(D, cfg.compile))
         compiled = G_fast is not None

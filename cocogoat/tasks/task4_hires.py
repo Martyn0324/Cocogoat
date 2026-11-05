@@ -133,7 +133,7 @@ class Task4Config:
     ema_kimg: tuple = (10.0, 300.0)
     aug_p: tuple = (0.2, 0.5)
     aug_policy: str = "color,translation,cutout"
-    reg_every: int = 4
+    reg_every: int = 8
     reg_fp32: bool = False
     compile: bool = True
     amp: bool = True

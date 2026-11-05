@@ -103,7 +103,7 @@ class Task3Config:
     aug_p: tuple = (0.2, 0.6)
     aug_policy: str = "color,translation,cutout"
     lat_aug_policy: str = "translation"
-    reg_every: int = 4
+    reg_every: int = 8
     reg_fp32: bool = False
     amp: bool = True
     compile: bool = True

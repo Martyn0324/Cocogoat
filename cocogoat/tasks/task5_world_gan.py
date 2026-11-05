@@ -160,7 +160,7 @@ class Task5Config:
     ctx_noise: float = 0.05
     ema_kimg: tuple = (10.0, 200.0)
     aug_p: tuple = (0.2, 0.5)
-    reg_every: int = 4
+    reg_every: int = 8
     amp: bool = True
     # ---- SR (Task 4 trainer on Inter4K HR frames) ----
     sr: SRConfig = field(default_factory=SRConfig)

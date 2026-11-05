@@ -24,6 +24,7 @@ import torch
 import torch.nn as nn
 
 from cocogoat.losses import gradient_penalty, rpgan_d_loss, rpgan_g_loss
+from cocogoat.nn.layers import benchmark_shift_for_regularization, depthwise_shift_mode
 from cocogoat.train.utils import autocast
 
 
@@ -81,6 +82,14 @@ class AdversarialTrainer:
         self.reg_fp32 = reg_fp32
         for slot in critics:
             slot.params = slot.critic.trainable_parameters()
+        # depthwise double backward: pick the faster implementation on this device
+        self.shift_for_reg = False
+        self.shift_timings: dict = {}
+        if device.type == "cuda":
+            try:
+                self.shift_for_reg, self.shift_timings = benchmark_shift_for_regularization(device)
+            except Exception as exc:  # noqa: BLE001
+                self.shift_timings = {"error": str(exc)[:200]}
 
     # ----------------------------------------------------------------------------------
     def d_step(self, real: dict[str, torch.Tensor], fake: dict[str, torch.Tensor], cond: torch.Tensor | None,
@@ -99,7 +108,7 @@ class AdversarialTrainer:
             enc_f = _detach_dict(enc_f, do_reg and slot.r2)
             use_amp = self.amp and not (do_reg and self.reg_fp32)
             cc = cond.get(slot.name) if isinstance(cond, dict) else cond
-            with autocast(self.device, use_amp):
+            with autocast(self.device, use_amp), depthwise_shift_mode(do_reg and self.shift_for_reg):
                 lr_ = critic.head(enc_r, cc)
                 lf_ = critic.head(enc_f, cc)
             loss = rpgan_d_loss(lr_, lf_)

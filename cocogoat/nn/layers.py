@@ -82,6 +82,82 @@ class FiLM(nn.Module):
         return x * (1 + scale) + shift
 
 
+# --------------------------------------------------------------------------------------
+# Depthwise convolution with a cheap second derivative
+# --------------------------------------------------------------------------------------
+# PyTorch's double backward of a grouped convolution computes the weight term one group at
+# a time (a loop over all channels for depthwise convs), which makes R1/R2 penalties through
+# depthwise layers extremely slow on GPU.  Inside ``depthwise_shift_mode()`` (used for the
+# regularisation passes only) depthwise convs are evaluated as a sum of k*k shifted,
+# per-channel-scaled copies of the input: mathematically identical, and every op in the graph
+# is element-wise, so the second derivative is cheap.
+
+_DW_SHIFT = False
+
+
+class depthwise_shift_mode:  # noqa: N801 - used as a context manager
+    def __init__(self, enabled: bool = True):
+        self.enabled = enabled
+        self.prev = False
+
+    def __enter__(self):
+        global _DW_SHIFT
+        self.prev, _DW_SHIFT = _DW_SHIFT, self.enabled
+        return self
+
+    def __exit__(self, *exc):
+        global _DW_SHIFT
+        _DW_SHIFT = self.prev
+        return False
+
+
+def depthwise_conv_shift(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None, padding: int) -> torch.Tensor:
+    k = weight.shape[-1]
+    h, w = x.shape[-2:]
+    xp = F.pad(x, (padding, padding, padding, padding))
+    wk = weight[:, 0].to(x.dtype)
+    out = None
+    for i in range(k):
+        for j in range(k):
+            term = xp[:, :, i:i + h, j:j + w] * wk[:, i, j].view(1, -1, 1, 1)
+            out = term if out is None else out + term
+    if bias is not None:
+        out = out + bias.to(x.dtype).view(1, -1, 1, 1)
+    return out
+
+
+def benchmark_shift_for_regularization(device: torch.device, channels: int = 256, res: int = 32,
+                                       batch: int = 64, reps: int = 3) -> tuple[bool, dict]:
+    """Time an R1-style double backward through a depthwise layer with and without the shift
+    implementation on ``device``; returns (use_shift, timings_ms)."""
+    import time as _time
+
+    conv = nn.Conv2d(channels, channels, 3, padding=1, groups=channels).to(device)
+    times = {}
+    for mode in (False, True):
+        for it in range(reps + 1):
+            if it == 1:
+                if device.type == "cuda":
+                    torch.cuda.synchronize()
+                t0 = _time.time()
+            x = torch.randn(batch, channels, res, res, device=device, requires_grad=True)
+            with depthwise_shift_mode(mode), torch.autocast(device.type, dtype=torch.bfloat16,
+                                                           enabled=device.type == "cuda"):
+                y = depthwise(conv, x)
+            (g,) = torch.autograd.grad(y.float().square().sum(), x, create_graph=True)
+            g.square().sum().backward()
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        times["shift" if mode else "native"] = (_time.time() - t0) / reps * 1000
+    return times["shift"] < times["native"], times
+
+
+def depthwise(conv: nn.Conv2d, x: torch.Tensor) -> torch.Tensor:
+    if _DW_SHIFT and conv.groups == conv.in_channels == conv.out_channels and conv.stride == (1, 1):
+        return depthwise_conv_shift(x, conv.weight, conv.bias, conv.padding[0])
+    return conv(x)
+
+
 class InvertedBottleneck(nn.Module):
     """Normalization-free depthwise-separable residual block.
 
@@ -105,7 +181,7 @@ class InvertedBottleneck(nn.Module):
         h = self.pw1(x)
         if self.film is not None and w is not None:
             h = self.film(h, w)
-        h = self.dw(lrelu(h))
+        h = depthwise(self.dw, lrelu(h))
         h = self.pw2(lrelu(h))
         return x + h
 
