@@ -1,0 +1,4 @@
+# Extras installed on top of the Colab image (which already ships torch, torchvision,
+# transformers, huggingface_hub, numpy, scipy, pandas, pyarrow, opencv, scikit-learn, pillow).
+lpips>=0.1.4          # perceptual loss (VGG backbone + linear calibration)
+pytorch-fid>=0.3.0    # FID-compatible InceptionV3 weights for FID / KID / precision-recall
