@@ -123,3 +123,20 @@ def test_spherical_kmeans():
     assert len(torch.unique(labels)) == 4
     for k in range(4):  # each true cluster maps to one label
         assert len(torch.unique(labels[k * 50:(k + 1) * 50])) == 1
+
+
+def test_seam_ratio_detects_mirrored_latent_cells():
+    from cocogoat.metrics.artifacts import seam_ratio
+
+    g = torch.Generator().manual_seed(0)
+    # smooth random images on a lattice not aligned with the 8-px cells (11x11 -> 64x64)
+    smooth = torch.nn.functional.interpolate(torch.randn(16, 3, 11, 11, generator=g), size=64, mode="bicubic",
+                                             align_corners=False)
+    s = seam_ratio(smooth, 8)
+    assert 0.8 < s["seam_v"] < 1.25 and 0.8 < s["seam_h"] < 1.25
+    # what a latent x-flip does to a decoder that is not flip-equivariant: 8-px cells move to the mirrored
+    # position but keep their own (unmirrored) content -> seams at every cell column only
+    cells = smooth.unflatten(3, (8, 8))                # (N, C, H, cell index, x within cell)
+    moved = cells.flip(3).flatten(3)
+    s = seam_ratio(moved, 8)
+    assert s["seam_v"] > 2.0 and s["seam_h"] < 1.25

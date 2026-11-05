@@ -33,6 +33,7 @@ from cocogoat.metrics import ImageEvaluator
 from cocogoat.models.gan2d import Discriminator, DiscriminatorConfig
 from cocogoat.models.latent_gan import LatentGenerator, LatentGeneratorConfig
 from cocogoat.models.vae import VAEConfig, load_vae
+from cocogoat.metrics.artifacts import seam_ratio
 from cocogoat.nn import count_params
 from cocogoat.tasks.common import (
     DRIVE_ROOT,
@@ -207,27 +208,32 @@ def train_latent_gan(cfg: Task3Config, vae_path: Path, images: np.ndarray, label
         lc, ls = vae.cfg.latent_channels, cfg.resolution // vae.cfg.downsample
 
         # ---- encode the whole dataset once: posterior mean + logvar (normalised space) ----
+        # x-flip augmentation happens in PIXEL space (each image is encoded as-is and mirrored): the decoder is
+        # not flip-equivariant, so mirroring a latent grid moves each cell without mirroring its content and
+        # decodes to seams at every cell column (vertical stripes), which the critics would learn as "real".
         imgs_t = torch.from_numpy(np.ascontiguousarray(images)).permute(0, 3, 1, 2)  # uint8 on CPU
+        n_orig = len(imgs_t)
         means, logstds = [], []
         with torch.no_grad():
-            for i in range(0, len(imgs_t), 1024):
-                x = imgs_t[i:i + 1024].to(device).float() / 127.5 - 1
-                with autocast(device, cfg.amp):
-                    m, lv = vae.encode(x)
-                means.append(vae.normalize(m.float()).half())
-                logstds.append((0.5 * lv.float() - vae.latent_std.log().view(1, -1, 1, 1)).half())
-        lat_mean = torch.cat(means)
+            for mirror in (False, True):
+                for i in range(0, n_orig, 1024):
+                    x = imgs_t[i:i + 1024].to(device).float() / 127.5 - 1
+                    if mirror:
+                        x = x.flip(3)
+                    with autocast(device, cfg.amp):
+                        m, lv = vae.encode(x)
+                    means.append(vae.normalize(m.float()).half())
+                    logstds.append((0.5 * lv.float() - vae.latent_std.log().view(1, -1, 1, 1)).half())
+        lat_mean = torch.cat(means)        # [originals; mirrored originals]
         lat_logstd = torch.cat(logstds)
-        y_all = torch.from_numpy(labels).to(device) if labels is not None else None
-        rd.print(f"encoded {len(lat_mean)} images -> latents {tuple(lat_mean.shape[1:])}; "
+        y_all = torch.from_numpy(labels).to(device).repeat(2) if labels is not None else None
+        rd.print(f"encoded {n_orig} images (+ their mirror images) -> latents {tuple(lat_mean.shape[1:])}; "
                  f"mean posterior std (normalised units) {lat_logstd.float().exp().mean():.3f}")
         img_bank = torch.from_numpy(np.ascontiguousarray(images)).permute(0, 3, 1, 2).contiguous().to(device)
 
         def sample_real(b: int):
             idx = torch.randint(len(lat_mean), (b,), device=device)
             z = lat_mean[idx].float() + torch.randn(b, lc, ls, ls, device=device) * lat_logstd[idx].float().exp()
-            flip = torch.rand(b, device=device) < 0.5   # x-flip in latent space (decoder is ~flip-equivariant)
-            z = torch.where(flip[:, None, None, None], z.flip(3), z)
             return z, (y_all[idx] if y_all is not None else None)
 
         cfg.G.latent_channels, cfg.G.latent_size, cfg.G.num_classes = lc, ls, num_classes
@@ -291,7 +297,7 @@ def train_latent_gan(cfg: Task3Config, vae_path: Path, images: np.ndarray, label
                     batches = (img_bank[i:i + 500].float() / 127.5 - 1 for i in range(0, len(img_bank), 500))
                 else:  # decoded reals (posterior means)
                     def _dec():
-                        for i in range(0, len(lat_mean), 500):
+                        for i in range(0, n_orig, 500):
                             with torch.no_grad(), autocast(device, cfg.amp):
                                 yield decode(lat_mean[i:i + 500].float()).float().clamp(-1, 1)
                     batches = _dec()
@@ -313,6 +319,7 @@ def train_latent_gan(cfg: Task3Config, vae_path: Path, images: np.ndarray, label
             m = ev.score_features(feats)
             m_dec = get_evaluator("decoded").score_features(feats)
             m.update({f"vs_decoded_{k}": v for k, v in m_dec.items() if k in ("fid", "kid_x1000", "precision", "recall")})
+            m.update(seam_ratio(sample_fn(512), vae.cfg.downsample))  # latent-cell seams of the fakes (1.0 = none)
             m.update(step=step, kimg=nimg / 1000, hours=clock.now() / 3600, eval_seconds=time.time() - t0, tag=tag)
             rd.log_metrics(kind="eval", **m)
             rd.print(f"[eval {tag}] " + " ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}"
@@ -332,6 +339,9 @@ def train_latent_gan(cfg: Task3Config, vae_path: Path, images: np.ndarray, label
         with torch.no_grad(), autocast(device, cfg.amp):
             zr, _ = sample_real(64)
             save_grid(decode(zr).float().clamp(-1, 1), rd.path / "samples" / "decoded_real.png")
+            seams_real = seam_ratio(decode(sample_real(512)[0]).float(), vae.cfg.downsample)
+        rd.print(f"latent-cell seams of decoded reals (1.0 = none): vertical {seams_real['seam_v']:.2f}, "
+                 f"horizontal {seams_real['seam_h']:.2f}")
         save_grid(img_bank[:64].float() / 127.5 - 1, rd.path / "samples" / "real.png")
 
         def train_step(g_net, ot_w):
@@ -443,7 +453,9 @@ def train_latent_gan(cfg: Task3Config, vae_path: Path, images: np.ndarray, label
             import json
 
             vae_metrics = json.loads(vm.read_text())
-        summary = {"final": final, "vae": {k: vae_metrics.get(k) for k in ("psnr", "ssim", "lpips", "rfid")},
+        summary = {"final": final, "vae": {k: vae_metrics.get(k) for k in ("psnr", "ssim", "lpips", "rfid", "seam_v",
+                                                                         "seam_h")},
+                   "decoded_real_seams": seams_real,
                    "steps": step, "kimg": nimg / 1000, "hours": clock.now() / 3600, "num_classes": num_classes,
                    "label_source": label_source, "budget_hours": cfg.hours}
         rd.write_json("final_metrics.json", summary)
@@ -452,7 +464,10 @@ def train_latent_gan(cfg: Task3Config, vae_path: Path, images: np.ndarray, label
             {**{k: v for k, v in final.items() if not isinstance(v, str)},
              **{f"vae_{k}": v for k, v in summary["vae"].items() if v is not None}},
             ["fid/kid/precision/recall: Dec(G(z)) vs real images; vs_decoded_*: vs VAE reconstructions; "
-             "vae_rfid: reconstruction floor.", "Samples: samples/final.png, samples/final_per_class.png"]))
+             "vae_rfid: reconstruction floor.",
+             "seam_v / seam_h: jump across latent-cell edges / jump elsewhere (vertical / horizontal seams; "
+             f"1.0 = none). Decoded reals: {seams_real['seam_v']:.2f} / {seams_real['seam_h']:.2f}.",
+             "Samples: samples/final.png, samples/final_per_class.png"]))
         rd.mark_done(summary)
         rd.print("DONE")
         return summary

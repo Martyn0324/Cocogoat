@@ -314,6 +314,7 @@ def train_vae(cfg: Task2Config, train: ClipBank, test: ClipBank, device: torch.d
 
 @torch.no_grad()
 def evaluate_vae(cfg: Task2Config, vae: VAE, test: ClipBank, device: torch.device, rd: RunDir) -> dict:
+    from cocogoat.metrics.artifacts import seam_ratio
     from cocogoat.metrics.fid import ImageEvaluator
     from cocogoat.metrics.video import LPIPSMetric
 
@@ -335,8 +336,12 @@ def evaluate_vae(cfg: Task2Config, vae: VAE, test: ClipBank, device: torch.devic
     recs = torch.cat(recs)
     fake_feats = np.concatenate([feat(recs[i:i + 256]).cpu().numpy() for i in range(0, len(recs), 256)])
     rfid = ev.score_features(fake_feats, kid_subset=min(1000, n))["fid"]
+    seams = seam_ratio(recs[:1024], vae.cfg.downsample)  # latent-cell seams of reconstructions (1.0 = none)
+    seams_real = seam_ratio(ClipBank.to_float(test.frames[:min(n, 1024)]), vae.cfg.downsample)
     return {"psnr": float(torch.cat(ps).mean()), "ssim": float(torch.cat(ss).mean()),
             "lpips": float(torch.cat(ls).mean()), "rfid": rfid, "n_frames": n,
+            "seam_v": seams["seam_v"], "seam_h": seams["seam_h"],
+            "seam_v_real": seams_real["seam_v"], "seam_h_real": seams_real["seam_h"],
             "latent_mean": vae.latent_mean.tolist(), "latent_std": vae.latent_std.tolist()}
 
 
