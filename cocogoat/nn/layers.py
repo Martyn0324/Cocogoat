@@ -259,3 +259,88 @@ def resolution_stages(res: int, base: int = 4) -> list[int]:
     n = int(math.log2(res // base))
     assert base * 2 ** n == res, f"resolution {res} must be {base} * 2^k"
     return [base * 2 ** i for i in range(n + 1)]
+
+
+# --------------------------------------------------------------------------------------
+# Autoencoder blocks (normalisation is fine here: no gradient penalty acts on these nets)
+# --------------------------------------------------------------------------------------
+
+class LayerNorm2d(nn.Module):
+    """Per-pixel LayerNorm over channels for NCHW tensors (ConvNeXt 'channels_first' LN)."""
+
+    def __init__(self, channels: int, eps: float = 1e-6, affine: bool = True):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(channels)) if affine else None
+        self.bias = nn.Parameter(torch.zeros(channels)) if affine else None
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        dtype = x.dtype
+        x = x.float()
+        u = x.mean(dim=1, keepdim=True)
+        s = (x - u).square().mean(dim=1, keepdim=True)
+        x = ((x - u) * (s + self.eps).rsqrt()).to(dtype)
+        if self.weight is not None:
+            x = x * self.weight.to(dtype)[:, None, None] + self.bias.to(dtype)[:, None, None]
+        return x
+
+
+class ConvNeXtBlock(nn.Module):
+    """depthwise kxk -> LayerNorm2d -> 1x1 expand -> GELU -> 1x1 project, layer-scaled residual."""
+
+    def __init__(self, channels: int, expansion: float = 4.0, kernel: int = 7, layer_scale: float = 1e-6,
+                 cond_dim: int | None = None):
+        super().__init__()
+        hidden = int(round(channels * expansion))
+        self.dw = nn.Conv2d(channels, channels, kernel, padding=kernel // 2, groups=channels)
+        self.norm = LayerNorm2d(channels, affine=cond_dim is None)
+        self.film = FiLM(cond_dim, channels) if cond_dim else None
+        self.pw1 = nn.Conv2d(channels, hidden, 1)
+        self.pw2 = nn.Conv2d(hidden, channels, 1)
+        self.gamma = nn.Parameter(torch.full((channels,), layer_scale))
+
+    def forward(self, x: torch.Tensor, w: torch.Tensor | None = None) -> torch.Tensor:
+        h = self.norm(self.dw(x))
+        if self.film is not None and w is not None:
+            h = self.film(h, w)
+        h = self.pw2(F.gelu(self.pw1(h)))
+        return x + self.gamma[:, None, None].to(h.dtype) * h
+
+
+class ResidualDown(nn.Module):
+    """PixelUnshuffle -> 1x1 conv, plus a parameter-free space-to-channel shortcut (DC-AE)."""
+
+    def __init__(self, cin: int, cout: int, factor: int = 2):
+        super().__init__()
+        self.factor = factor
+        unshuffled = cin * factor * factor
+        assert unshuffled % cout == 0, f"{unshuffled} channels not divisible by {cout}"
+        self.group = unshuffled // cout
+        self.cout = cout
+        self.proj = nn.Conv2d(unshuffled, cout, 1)
+        nn.init.xavier_uniform_(self.proj.weight, gain=0.5)
+        nn.init.zeros_(self.proj.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        u = F.pixel_unshuffle(x, self.factor)
+        b, _, h, w = u.shape
+        shortcut = u.view(b, self.cout, self.group, h, w).mean(dim=2)
+        return self.proj(u) + shortcut
+
+
+class ResidualUp(nn.Module):
+    """1x1 conv -> PixelShuffle, plus a channel-duplication + PixelShuffle shortcut (DC-AE)."""
+
+    def __init__(self, cin: int, cout: int, factor: int = 2):
+        super().__init__()
+        self.factor = factor
+        expanded = cout * factor * factor
+        assert expanded % cin == 0, f"{expanded} channels not divisible by {cin}"
+        self.repeats = expanded // cin
+        self.proj = nn.Conv2d(cin, expanded, 1)
+        nn.init.xavier_uniform_(self.proj.weight, gain=0.5)
+        nn.init.zeros_(self.proj.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        shortcut = x.repeat_interleave(self.repeats, dim=1)
+        return F.pixel_shuffle(self.proj(x) + shortcut, self.factor)

@@ -42,7 +42,15 @@ print(subprocess.run(['git', '-C', '/content/Cocogoat', 'log', '-1', '--oneline'
 os.chdir('/content/Cocogoat')""",
     """# 3) Extra packages (torch/torchvision/transformers come with Colab)
 !pip -q install -r /content/Cocogoat/requirements-colab.txt
-!nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv""",
+!nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+# Colab Secrets are only readable from the notebook kernel: export HF_TOKEN for the training subprocesses
+try:
+    from google.colab import userdata
+    os.environ['HF_TOKEN'] = userdata.get('HF_TOKEN')
+    print('HF_TOKEN exported')
+except Exception as exc:
+    print('No HF_TOKEN secret (only needed for gated Hugging Face datasets):', type(exc).__name__)
+os.environ['PYTHONUNBUFFERED'] = '1'""",
 ]
 
 
