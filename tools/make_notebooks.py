@@ -164,6 +164,29 @@ display(Image(f'{run}/gan/samples/final.png'))
 display(Image(f'{run}/gan/samples/final_per_class.png'))""",
         ],
     ),
+
+    "04_task4_hires_1024.ipynb": notebook(
+        "Task 4: prompt-conditional 1024x1024 GAN (~10.5 h)",
+        "FFHQ-1024 (70k faces) downloaded from the Hugging Face mirror on Colab. Base GAN at 256x256 conditioned on "
+        "CLIP ViT-L/14 embeddings (language-free LAFITE training: image embeddings + noise while training, text "
+        "prompts at inference), with a pixel critic and a projected critic on frozen DINOv2-S features "
+        "(~7 h). Then a x4 super-resolution GAN trained from scratch on real 1024 crops (~2.5 h). Final evaluation at "
+        "1024: KID/FID, patch-KID on native-resolution crops, precision/recall, CLIP score for text prompts. "
+        "Outputs: `MyDrive/Cocogoat/runs/task4/`. Needs ~130 GB of the Colab disk (dataset + decoded arrays).",
+        [
+            """# 4) GPU smoke test (tiny models on synthetic shards, a few steps)
+!python -m cocogoat.tasks.task4_hires --smoke --run_dir /content/drive/MyDrive/Cocogoat/runs/task4_smoke --force""",
+            """# 5) Data (~20-30 min: 64 GB download + decode + CLIP embeddings), base GAN (7 h), SR (2.5 h), 1024 evaluation.
+#    Everything resumes: if Colab disconnects, Run all again (the data step re-downloads on a fresh VM).
+!python -m cocogoat.tasks.task4_hires""",
+            """# 6) Results
+from IPython.display import Image, Markdown, display
+run = '/content/drive/MyDrive/Cocogoat/runs/task4'
+display(Markdown(open(f'{run}/eval/report.md').read()))
+display(Image(f'{run}/eval/samples/prompts_grid.png'))
+display(Image(f'{run}/sr/samples/sr_final.png'))""",
+        ],
+    ),
 }
 
 

@@ -66,7 +66,7 @@ class GeneratorConfig:
     num_classes: int = 0
     cond_vector_dim: int = 0
     channels: dict[int, int] = field(default_factory=dict)
-    blocks: int = 2
+    blocks: int | dict = 2              # or {resolution: blocks}
     attn_res: tuple[int, ...] = (16,)
     heads: int = 4
     expansion: float | dict = 3.0       # or {resolution: expansion}
@@ -84,7 +84,7 @@ class DiscriminatorConfig:
     num_classes: int = 0
     cond_vector_dim: int = 0
     channels: dict[int, int] = field(default_factory=dict)
-    blocks: int = 2
+    blocks: int | dict = 2              # or {resolution: blocks}
     attn_res: tuple[int, ...] = (16, 8)
     heads: int = 4
     expansion: float | dict = 3.0       # or {resolution: expansion}
@@ -117,7 +117,7 @@ class Generator(nn.Module):
                 self.ups[str(r)] = UpStage(prev, c)
             self.blocks[str(r)] = nn.ModuleList(
                 [InvertedBottleneck(c, _expansion(cfg.expansion, r), cfg.kernel, cond_dim=cfg.w_dim)
-                 for _ in range(cfg.blocks)])
+                 for _ in range(int(_expansion(cfg.blocks, r)))])
             if r in cfg.attn_res:
                 self.attn[str(r)] = SelfAttention2d(c, cfg.heads, cond_dim=cfg.w_dim)
             prev = c
@@ -162,7 +162,8 @@ class Discriminator(nn.Module):
         for r in res_desc:
             c = chans[r]
             self.blocks[str(r)] = nn.ModuleList(
-                [InvertedBottleneck(c, _expansion(cfg.expansion, r), cfg.kernel) for _ in range(cfg.blocks)])
+                [InvertedBottleneck(c, _expansion(cfg.expansion, r), cfg.kernel)
+                 for _ in range(int(_expansion(cfg.blocks, r)))])
             if r in cfg.attn_res:
                 self.attn[str(r)] = SelfAttention2d(c, cfg.heads, double_backward_safe=True)
             if r > 4:

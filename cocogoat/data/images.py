@@ -142,16 +142,25 @@ def load_array_images(path: str | Path, key: str | None = None, cache_dir: str |
 # GPU-resident dataset
 # --------------------------------------------------------------------------------------
 
+def to_device_nchw(images, device, chunk: int = 1024) -> torch.Tensor:
+    """uint8 NHWC (numpy / memmap / tensor) -> contiguous uint8 NCHW on ``device``, copied in chunks so a
+    40+ GB memmap never needs a second full-size host copy."""
+    n, h, w, c = images.shape
+    assert c == 3, images.shape
+    out = torch.empty((n, 3, h, w), dtype=torch.uint8, device=device)
+    for i in range(0, n, chunk):
+        part = images[i:i + chunk]
+        part = torch.from_numpy(np.array(part)) if not torch.is_tensor(part) else part
+        out[i:i + len(part)] = part.to(device).permute(0, 3, 1, 2)
+    return out
+
 class GPUImageBank:
     """uint8 images (+ optional labels / condition vectors) resident on one device."""
 
     def __init__(self, images: np.ndarray | torch.Tensor, labels: np.ndarray | torch.Tensor | None = None,
                  device: str | torch.device = "cuda", xflip: bool = True):
-        if isinstance(images, np.ndarray):
-            images = torch.from_numpy(np.ascontiguousarray(images))
-        assert images.dtype == torch.uint8 and images.ndim == 4 and images.shape[-1] == 3, images.shape
         self.device = torch.device(device)
-        self.images = images.permute(0, 3, 1, 2).contiguous().to(self.device)  # N,3,H,W uint8
+        self.images = to_device_nchw(images, self.device)  # N,3,H,W uint8
         if labels is not None and isinstance(labels, np.ndarray):
             labels = torch.from_numpy(labels)
         self.labels = labels.to(self.device) if labels is not None else None

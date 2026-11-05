@@ -35,6 +35,10 @@ class InceptionFeatures(nn.Module):
     @torch.no_grad()
     def forward(self, x_m11: torch.Tensor) -> torch.Tensor:
         x01 = ((x_m11.float().clamp(-1, 1) + 1) / 2).to(self.device)
+        if x01.shape[-1] > 299 or x01.shape[-2] > 299:
+            # antialiased downscale for high-res inputs (pytorch-fid would alias when going 1024 -> 299)
+            x01 = torch.nn.functional.interpolate(x01, size=(299, 299), mode="bicubic", antialias=True,
+                                                  align_corners=False).clamp(0, 1)
         return self.net(x01)[0].flatten(1).float()
 
 
