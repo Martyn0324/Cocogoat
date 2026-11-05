@@ -108,9 +108,11 @@ class Task2Config:
     rollout_k: int = 3
     rollout_weight: float = 0.5
     rollout_fraction: float = 0.25
-    eval_context: int = 64
-    eval_horizon: int = 64
-    eval_clips: int = 256
+    eval_context: int = 64                  # real frames given to the world model in evaluation
+    eval_horizon: int = 64                  # frames it then generates autoregressively (any length)
+    eval_clips: int = 256                   # held-out clips (capped so all of them fit in memory)
+    eval_batch: int = 64                    # clips rolled out together (capped for long horizons)
+    start_frame: int = 0                    # video datasets: drop the first N frames (e.g. Shelter's black intro)
     # cadence / misc
     log_every: int = 50
     eval_minutes: float = 15.0
@@ -155,7 +157,8 @@ def load_banks(cfg: Task2Config, device: torch.device, rd: RunDir) -> tuple[Clip
         else:
             digits_tr, digits_te = load_mnist_digits(cache, True), load_mnist_digits(cache, False)
         tr = colored_moving_mnist(digits_tr, cfg.mmnist_train_seqs, cfg.mmnist_frames, cfg.resolution, seed=0)
-        te = colored_moving_mnist(digits_te, cfg.mmnist_test_seqs, cfg.mmnist_frames, cfg.resolution, seed=1)
+        te_frames = max(cfg.mmnist_frames, cfg.eval_context + cfg.eval_horizon)  # long enough for evaluation
+        te = colored_moving_mnist(digits_te, cfg.mmnist_test_seqs, te_frames, cfg.resolution, seed=1)
         info = {"train_frames": int(tr.shape[0] * tr.shape[1]), "test_frames": int(te.shape[0] * te.shape[1]),
                 "train_seqs": int(tr.shape[0])}
         return ClipBank.from_sequences(tr, device), ClipBank.from_sequences(te, device), info
@@ -165,6 +168,11 @@ def load_banks(cfg: Task2Config, device: torch.device, rd: RunDir) -> tuple[Clip
     drive_cache = Path(cfg.drive_cache) if Path(cfg.drive_cache).parent.exists() else None
     frames = np.asarray(load_array_images(path, cfg.data_key, cache_dir=LOCAL_CACHE, drive_cache=drive_cache))
     rd.print(f"frames {frames.shape} from {path.name}")
+    if cfg.start_frame:
+        if cfg.start_frame >= len(frames):
+            raise ValueError(f"start_frame {cfg.start_frame} >= number of frames {len(frames)}")
+        frames = frames[cfg.start_frame:]
+        rd.print(f"dropped the first {cfg.start_frame} frames -> {len(frames)} frames")
     if frames.shape[1] != cfg.resolution or frames.shape[2] != cfg.resolution:
         t = torch.from_numpy(frames).permute(0, 3, 1, 2)
         out = []
@@ -393,7 +401,16 @@ def train_world_model(cfg: Task2Config, vae_path: Path, train: ClipBank, test: C
             set_rng_state(st["rng"])
             rd.print(f"resumed world model at step {step}")
         eval_len = cfg.eval_context + cfg.eval_horizon
-        eval_clips = test.fixed_clips(cfg.eval_clips, eval_len, cfg.clip_stride, seed=0)
+        n_avail = len(test.valid_starts(eval_len, cfg.clip_stride))
+        if n_avail == 0:
+            raise ValueError(f"no held-out clip has {eval_len} frames without a scene cut "
+                             f"(eval_context {cfg.eval_context} + eval_horizon {cfg.eval_horizon}); use a shorter "
+                             f"horizon")
+        # clips are kept on the GPU as float: cap the total number of frames (~0.8 GB at 64 px)
+        n_eval = max(1, min(cfg.eval_clips, n_avail, (16384 * 64 * 64) // (eval_len * cfg.resolution ** 2)))
+        eval_clips = test.fixed_clips(n_eval, eval_len, cfg.clip_stride, seed=0)
+        rd.print(f"evaluation: {n_eval} held-out clips x ({cfg.eval_context} context + {cfg.eval_horizon} "
+                 f"generated) frames")
         clock = TrainClock(elapsed)
         budget = cfg.wm_hours * 3600
         ckpt_timer, eval_timer = Every(cfg.ckpt_minutes * 60), Every(cfg.eval_minutes * 60)
@@ -489,8 +506,9 @@ def evaluate_world_model(cfg: Task2Config, vae: VAE, wm: WorldModel, clips: torc
                            "model_ssim", "copy_ssim", "model_lpips", "copy_lpips"]}
     per_clip = {k: [] for k in res}
     strips = []
-    for i in range(0, clips.shape[0], 64):
-        x = clips[i:i + 64]
+    nb = max(1, min(cfg.eval_batch, 1024 // (c + h)))  # batched rollout; ~1k frames per pass for long horizons
+    for i in range(0, clips.shape[0], nb):
+        x = clips[i:i + nb]
         z = encode_clips(vae, x, cfg.amp, device)
         with autocast(device, cfg.amp):
             pred = wm.rollout(z[:, :c], h).float()
@@ -523,7 +541,7 @@ def evaluate_world_model(cfg: Task2Config, vae: VAE, wm: WorldModel, clips: torc
         ctx, gt, pr = strips[j:j + 3]
         rows += [torch.cat([ctx, gt]), torch.cat([ctx, pr])]
     if rows:
-        save_grid(torch.cat(rows), rd.path / "samples" / f"rollout_{tag}.png", nrow=c + h)
+        save_grid(torch.cat(rows), rd.path / "samples" / f"rollout_{tag}.png", nrow=c + h, max_side=8192)
     res["context"], res["horizon"] = c, h
     return res
 
@@ -581,6 +599,11 @@ def main(argv=None):
     ap.add_argument("--device", default=None)
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--eval_context", type=int, default=None, help="real frames given before generation")
+    ap.add_argument("--eval_horizon", type=int, default=None, help="frames generated in evaluation")
+    ap.add_argument("--eval_clips", type=int, default=None)
+    ap.add_argument("--eval_batch", type=int, default=None, help="clips generated together")
+    ap.add_argument("--start_frame", type=int, default=None, help="drop the first N frames of a video dataset")
     ap.add_argument("--override", default=None)
     args = ap.parse_args(argv)
     cfg = Task2Config()
@@ -592,6 +615,10 @@ def main(argv=None):
             setattr(cfg, k, v)
     if cfg.dataset == "mmnist" and not args.smoke:
         cfg.clip_len, cfg.eval_context, cfg.eval_horizon = 20, 10, 10
+    for k in ["eval_context", "eval_horizon", "eval_clips", "eval_batch", "start_frame"]:
+        v = getattr(args, k)
+        if v is not None:
+            setattr(cfg, k, v)
     cfg.force = args.force
     apply_overrides(cfg, parse_override(args.override))
     if args.smoke:  # smoke tests always start from scratch

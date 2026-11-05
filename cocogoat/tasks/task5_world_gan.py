@@ -169,7 +169,9 @@ class Task5Config:
     # ---- eval / cadence ----
     eval_images: int = 5000
     eval_videos: int = 48
-    video_frames: int = 24
+    video_frames: int = 24                 # length of generated videos in the final evaluation
+    eval_horizon: int = 8                  # frames the world model generates in periodic evaluations
+    eval_clips: int = 256                  # held-out clips for those evaluations (capped by memory)
     fps: int = 15
     log_every: int = 50
     sample_minutes: float = 20.0
@@ -383,11 +385,15 @@ def train_worldgan(cfg: Task5Config, vae_path: Path, low, seg, emb, device, run_
             extra = {"preds": preds, "target": z[:, cfg.ctx:], "zi": zi, "noise": noise}
             return real, fake, cond, extra
 
-        holdout = test.fixed_clips(min(256, max(1, len(test.valid_starts(cfg.ctx + 8)))), cfg.ctx + 8, seed=0) \
-            if len(test.valid_starts(cfg.ctx + 8)) else None
+        H = cfg.eval_horizon
+        n_avail = len(test.valid_starts(cfg.ctx + H))
+        n_hold = max(1, min(cfg.eval_clips, n_avail, 3072 // (cfg.ctx + H)))  # <= ~3k frames (2.4 GB at 256 px)
+        holdout = test.fixed_clips(n_hold, cfg.ctx + H, seed=0) if n_avail else None
+        if holdout is None:
+            rd.print(f"no held-out clip has {cfg.ctx + H} frames: world-model rollout evaluation skipped")
         holdout_seg = None
         if holdout is not None:
-            starts = test.valid_starts(cfg.ctx + 8).cpu()
+            starts = test.valid_starts(cfg.ctx + H).cpu()
             g = torch.Generator().manual_seed(0)
             sel = starts[torch.randperm(len(starts), generator=g)[:holdout.shape[0]]]
             holdout_seg = test.seg[sel.to(device)]
@@ -424,7 +430,7 @@ def train_worldgan(cfg: Task5Config, vae_path: Path, low, seg, emb, device, run_
                 z = encode(holdout)
                 c = clip_cond(holdout_seg, perturbed=False)
                 with autocast(device, cfg.amp):
-                    preds, _ = rollout(G_wm_e, z[:, :cfg.ctx], 8, c)
+                    preds, _ = rollout(G_wm_e, z[:, :cfg.ctx], H, c)
                 gt = z[:, cfg.ctx:]
                 copy = z[:, cfg.ctx - 1:cfg.ctx].expand_as(gt)
                 m["wm_latent_mse"] = (preds - gt).square().mean(dim=(0, 2, 3, 4)).tolist()
@@ -432,17 +438,17 @@ def train_worldgan(cfg: Task5Config, vae_path: Path, low, seg, emb, device, run_
                 with autocast(device, cfg.amp):
                     xp = decode(preds[:, -1]).float().clamp(-1, 1)
                     xg = decode(gt[:, -1]).float().clamp(-1, 1)
-                m["wm_psnr_t8_vs_decoded_gt"] = float(psnr(xp, xg).mean())
+                m[f"wm_psnr_t{H}_vs_decoded_gt"] = float(psnr(xp, xg).mean())
                 pf = feat(xp).cpu().numpy()
-                m["wm_frame_kid_t8_x1000"] = kid(rf, pf, subset_size=min(1000, len(pf)))[0] * 1000
+                m[f"wm_frame_kid_t{H}_x1000"] = kid(rf, pf, subset_size=min(1000, len(pf)))[0] * 1000
                 nr = min(4, preds.shape[0])
                 with autocast(device, cfg.amp):
-                    pd = decode(preds[:nr].flatten(0, 1)).float().clamp(-1, 1).view(nr, 8, 3, cfg.low_res, cfg.low_res)
+                    pd = decode(preds[:nr].flatten(0, 1)).float().clamp(-1, 1).view(nr, H, 3, cfg.low_res, cfg.low_res)
                 rows = []
                 for r in range(nr):  # per clip: real context + real future, then real context + predicted future
                     rows += [torch.cat([holdout[r, :cfg.ctx], holdout[r, cfg.ctx:]]),
                              torch.cat([holdout[r, :cfg.ctx], pd[r]])]
-                save_grid(torch.cat(rows), rd.path / "samples" / f"rollout_{tag}.png", nrow=cfg.ctx + 8, max_side=3072)
+                save_grid(torch.cat(rows), rd.path / "samples" / f"rollout_{tag}.png", nrow=cfg.ctx + H, max_side=8192)
             m.update(step=step, kimg=nimg / 1000, hours=clock.now() / 3600, tag=tag)
             rd.log_metrics(kind="eval", **m)
             rd.print(f"[world-gan eval {tag}] " + " ".join(
@@ -786,12 +792,15 @@ def main(argv=None):
     ap.add_argument("--device", default=None)
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--eval_horizon", type=int, default=None, help="frames generated in periodic evaluations")
+    ap.add_argument("--video_frames", type=int, default=None, help="length of generated videos (final eval)")
     ap.add_argument("--override", default=None)
     args = ap.parse_args(argv)
     cfg = Task5Config()
     if args.smoke:
         cfg = smoke_config(cfg)
-    for k in ["stage", "run_dir", "gan_hours", "sr_hours", "max_clips", "local_clips", "max_steps", "device"]:
+    for k in ["stage", "run_dir", "gan_hours", "sr_hours", "max_clips", "local_clips", "max_steps", "device",
+              "eval_horizon", "video_frames"]:
         v = getattr(args, k)
         if v is not None:
             setattr(cfg, k, v)
