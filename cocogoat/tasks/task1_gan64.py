@@ -34,6 +34,7 @@ from cocogoat.models.gan2d import Discriminator, DiscriminatorConfig, Generator,
 from cocogoat.nn import count_params
 from cocogoat.tasks.common import (
     DRIVE_ROOT,
+    fresh_smoke_run,
     LOCAL_CACHE,
     USER_DATA,
     apply_overrides,
@@ -442,6 +443,8 @@ def main(argv=None):
             setattr(cfg, k, v)
     cfg.force = args.force
     apply_overrides(cfg, parse_override(args.override))
+    if args.smoke:  # smoke tests always start from scratch
+        fresh_smoke_run(cfg.run_dir)
     return run(cfg)
 
 

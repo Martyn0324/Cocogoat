@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import shutil
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -33,6 +34,14 @@ def apply_overrides(cfg: Any, overrides: dict) -> Any:
 
 def parse_override(s: str | None) -> dict:
     return json.loads(s) if s else {}
+
+
+def fresh_smoke_run(path: str | Path, root: str | Path | None = None) -> None:
+    """Smoke tests start from scratch: delete a previous smoke run (only folders named ``*_smoke``)."""
+    p = Path(path)
+    if Path(root if root is not None else p).name.endswith("_smoke") and p.exists():
+        shutil.rmtree(p)
+        print(f"smoke test: removed the previous smoke run in {p}", flush=True)
 
 
 def rotate_old_error(run_dir: Path) -> None:

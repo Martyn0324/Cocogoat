@@ -36,6 +36,7 @@ from cocogoat.models.vae import VAEConfig, load_vae
 from cocogoat.nn import count_params
 from cocogoat.tasks.common import (
     DRIVE_ROOT,
+    fresh_smoke_run,
     USER_DATA,
     apply_overrides,
     make_feature_fn,
@@ -483,6 +484,8 @@ def main(argv=None):
         cfg.vae_stage.vae_hours = args.vae_hours
     cfg.force = args.force
     apply_overrides(cfg, parse_override(args.override))
+    if args.smoke:  # smoke tests always start from scratch
+        fresh_smoke_run(cfg.run_dir)
     return run(cfg)
 
 

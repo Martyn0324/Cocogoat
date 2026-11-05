@@ -17,8 +17,9 @@ models (CLIP, DINOv2, InceptionV3 for metrics, VGG for LPIPS). No pretrained gen
 | 5 | Latent world-GAN at 1024 (image + video) | Inter4K (1,000 4K clips) | latent image GAN + stochastic adversarial world model (self-forced rollouts, temporal critic), world-model toggle, SR to 1024, mp4 videos | `notebooks/05_task5_world_gan_1024.ipynb` |
 
 **How to run (Google Colab, G4 / RTX PRO 6000):** open a notebook from this branch on Colab, choose the G4 runtime
-and *Run all*. Each notebook clones the branch, runs a short GPU smoke test, then trains with a time budget.
-Checkpoints, metrics (`metrics.jsonl`, `final_metrics.json`, `report.md`), sample grids and logs go to
+and *Run all*. Each notebook clones the branch, runs a short GPU smoke test, then trains with the time budgets
+(hours) and output folder set in its settings cell (cell 5); Tasks 4 and 5 can also use a data subset there for
+quick tests. Checkpoints, metrics (`metrics.jsonl`, `final_metrics.json`, `report.md`), sample grids and logs go to
 `MyDrive/Cocogoat/runs/<task>/`; after a disconnect, *Run all* resumes from the last checkpoint. Run
 `notebooks/00_probe.ipynb` first on a new machine to check the GPU, datasets and pretrained downloads.
 

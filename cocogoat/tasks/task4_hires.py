@@ -45,6 +45,7 @@ from cocogoat.models.sr import SRConfig, SRNet, degrade
 from cocogoat.nn import count_params
 from cocogoat.tasks.common import (
     DRIVE_ROOT,
+    fresh_smoke_run,
     LOCAL_CACHE,
     apply_overrides,
     load_compatible,
@@ -701,6 +702,9 @@ def run(cfg: Task4Config) -> dict:
         if cfg.smoke and not cfg.local_shards:
             cfg.local_shards = str(make_fake_shards(LOCAL_CACHE / "fake_ffhq", 2, 6, cfg.hr_res)[0].parent)
         low, hr, emb, gap = prepare_data(cfg, rd, device)
+        if not cfg.smoke and cfg.holdout > low.shape[0] // 10:  # small --max_shards subsets: keep 90% for training
+            cfg.holdout = max(1, low.shape[0] // 10)
+            rd.print(f"holdout reduced to {cfg.holdout} images for a {low.shape[0]}-image subset")
         if cfg.stage == "data":
             return {}
         base_path = root / "base" / "G_ema_base.pt"
@@ -708,7 +712,8 @@ def run(cfg: Task4Config) -> dict:
         if cfg.stage in ("base", "all"):
             base_path = train_base(cfg, low, emb, device, root / "base")
         if cfg.stage in ("sr", "all"):
-            sr_path = train_sr(cfg, hr, device, root / "sr")
+            n_train = low.shape[0] - cfg.holdout  # HR faces are the first images; exclude held-out ones
+            sr_path = train_sr(cfg, hr[:n_train] if hr.shape[0] > n_train else hr, device, root / "sr")
         if cfg.stage in ("eval", "all"):
             return final_eval(cfg, low, hr, emb, gap, base_path, sr_path, device, root / "eval")
         return {}
@@ -737,6 +742,8 @@ def main(argv=None):
             setattr(cfg, k, v)
     cfg.force = args.force
     apply_overrides(cfg, parse_override(args.override))
+    if args.smoke:  # smoke tests always start from scratch
+        fresh_smoke_run(cfg.run_dir)
     return run(cfg)
 
 

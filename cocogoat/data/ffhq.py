@@ -69,9 +69,10 @@ def decode_shards(shards: list[Path], out_dir: str | Path, low_res: int = 256, k
     """Decode shards into ``ffhq_{low_res}.npy`` and ``ffhq_hr{hr_res}.npy`` (cached)."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    low_path = out_dir / f"ffhq_{low_res}.npy"
-    hr_path = out_dir / f"ffhq_hr{hr_res}_{keep_hr}.npy" if keep_hr > 0 else None
-    done_flag = out_dir / f"ffhq_{low_res}_{keep_hr}.done"
+    ns = f"{len(shards)}s"  # shard count in the names: a --max_shards subset never masquerades as the full set
+    low_path = out_dir / f"ffhq_{low_res}_{ns}.npy"
+    hr_path = out_dir / f"ffhq_hr{hr_res}_{keep_hr}_{ns}.npy" if keep_hr > 0 else None
+    done_flag = out_dir / f"ffhq_{low_res}_{keep_hr}_{ns}.done"
     if done_flag.exists():
         return np.load(low_path, mmap_mode="r"), (np.load(hr_path, mmap_mode="r") if hr_path else None)
     workers = workers or min(len(shards), os.cpu_count() or 8)

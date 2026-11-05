@@ -50,6 +50,7 @@ from cocogoat.models.world import WorldModel, WorldModelConfig
 from cocogoat.nn import count_params
 from cocogoat.tasks.common import (
     DRIVE_ROOT,
+    fresh_smoke_run,
     LOCAL_CACHE,
     apply_overrides,
     load_compatible,
@@ -742,6 +743,9 @@ def run(cfg: Task5Config) -> dict:
         world_path = root / "worldgan" / "world_gan.pt"
         sr_path = root / "sr" / "sr.pt"
         n_clips = int(seg.max()) + 1
+        if not cfg.smoke and cfg.holdout_clips > n_clips // 10:  # small --max_clips subsets: keep 90% for training
+            cfg.holdout_clips = max(1, n_clips // 10)
+            rd.print(f"holdout reduced to {cfg.holdout_clips} clips for a {n_clips}-clip subset")
         train_mask = seg < n_clips - cfg.holdout_clips
         if cfg.stage in ("vae", "all"):
             vcfg = cfg.vae_stage
@@ -795,6 +799,8 @@ def main(argv=None):
         cfg.vae_stage.vae_hours = args.vae_hours
     cfg.force = args.force
     apply_overrides(cfg, parse_override(args.override))
+    if args.smoke:  # smoke tests always start from scratch
+        fresh_smoke_run(cfg.run_dir)
     return run(cfg)
 
 

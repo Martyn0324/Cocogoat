@@ -21,7 +21,8 @@ HEADER_MD = """# Cocogoat 2026 - {title}
 
 {description}
 
-**How to run:** `Runtime -> Change runtime type -> G4 (RTX PRO 6000)`, then `Runtime -> Run all`.
+**How to run:** `Runtime -> Change runtime type -> G4 (RTX PRO 6000)`, set the budgets in the settings cell (5),
+then `Runtime -> Run all`.
 Keep this tab open (Colab Pro stops idle/closed sessions). Everything is written to
 `MyDrive/Cocogoat/runs/...`; if Colab disconnects, just *Run all* again - training resumes from the last checkpoint.
 You do not need to inspect results: metrics, sample grids and logs are saved to Drive for analysis."""
@@ -101,15 +102,19 @@ display(Markdown(open('/content/drive/MyDrive/Cocogoat/runs/probe/report.md').re
         "(cluster-conditioned GAN) against mode collapse. Budget: ~3.5 h of training + ~10 min data prep + final eval. "
         "Outputs: `MyDrive/Cocogoat/runs/task1/`.",
         [
-            """# 4) GPU smoke test (tiny model, ~10 steps). The first run also converts the 11 GB float64 file into a
-#    1.4 GB uint8 cache (MyDrive/Cocogoat/cache) - a few minutes, reused by every later run.
+            """# 4) GPU smoke test (tiny model, ~10 steps, always from scratch). The first run also converts the 11 GB
+#    float64 file into a 1.4 GB uint8 cache (MyDrive/Cocogoat/cache) - a few minutes, reused by every later run.
 !python -m cocogoat.tasks.task1_gan64 --smoke --dataset genshin --run_dir /content/drive/MyDrive/Cocogoat/runs/task1_smoke --force""",
-            """# 5) Full training run (resumes automatically from MyDrive/Cocogoat/runs/task1/ckpt/latest.pt)
-!python -m cocogoat.tasks.task1_gan64 --dataset genshin --hours 3.5""",
-            """# 6) Results
+            """# 5) Settings - edit freely. HOURS = training time budget (evaluation/data time not included).
+#    Raising HOURS later on the same RUN_DIR continues training from the last checkpoint.
+HOURS = 3.5
+RUN_DIR = '/content/drive/MyDrive/Cocogoat/runs/task1'""",
+            """# 6) Training (resumes automatically after a disconnect)
+!python -m cocogoat.tasks.task1_gan64 --dataset genshin --hours {HOURS} --run_dir {RUN_DIR}""",
+            """# 7) Results
 import json
 from IPython.display import Image, Markdown, display
-run = '/content/drive/MyDrive/Cocogoat/runs/task1'
+run = RUN_DIR
 display(Markdown(open(f'{run}/report.md').read()))
 display(Image(f'{run}/samples/final.png'))
 display(Image(f'{run}/samples/final_per_class.png'))""",
@@ -124,16 +129,21 @@ display(Image(f'{run}/samples/final_per_class.png'))""",
         "your ViVAE curriculum) and your `Shelterdataset.npz`. Budget: ~1.5 h per dataset. "
         "Outputs: `MyDrive/Cocogoat/runs/task2/<dataset>/{vae,wm}/`.",
         [
-            """# 4) GPU smoke test (tiny models, a few steps)
+            """# 4) GPU smoke test (tiny models, a few steps, always from scratch)
 !python -m cocogoat.tasks.task2_world --smoke --dataset mmnist --run_root /content/drive/MyDrive/Cocogoat/runs/task2_smoke --force""",
-            """# 5) Colored Moving MNIST: VAE (45 min) then world model (45 min); resumes automatically
-!python -m cocogoat.tasks.task2_world --dataset mmnist""",
-            """# 6) Shelter (your anime music-video frames): VAE (45 min) then world model (45 min)
-!python -m cocogoat.tasks.task2_world --dataset shelter""",
-            """# 7) Results
+            """# 5) Settings - edit freely. Training time budgets in hours, per dataset (evaluation/data time not included).
+#    Quick test: small budgets AND a separate folder (e.g. '.../runs/task2_test'): a finished Task 2 stage is not
+#    extended later, so a test inside runs/task2 would block the full run there.
+VAE_HOURS, WM_HOURS = 0.75, 0.75
+RUN_ROOT = '/content/drive/MyDrive/Cocogoat/runs/task2'""",
+            """# 6) Colored Moving MNIST: VAE, then world model (resumes automatically after a disconnect)
+!python -m cocogoat.tasks.task2_world --dataset mmnist --vae_hours {VAE_HOURS} --wm_hours {WM_HOURS} --run_root {RUN_ROOT}""",
+            """# 7) Shelter (your anime music-video frames): VAE, then world model
+!python -m cocogoat.tasks.task2_world --dataset shelter --vae_hours {VAE_HOURS} --wm_hours {WM_HOURS} --run_root {RUN_ROOT}""",
+            """# 8) Results
 from IPython.display import Image, Markdown, display
 for ds in ['mmnist', 'shelter']:
-    run = f'/content/drive/MyDrive/Cocogoat/runs/task2/{ds}'
+    run = f'{RUN_ROOT}/{ds}'
     try:
         display(Markdown(f'## {ds}\\n' + open(f'{run}/wm/report.md').read()))
         display(Image(f'{run}/vae/samples/recon_final.png'))
@@ -151,13 +161,18 @@ for ds in ['mmnist', 'shelter']:
         "latent critic on z' vs posterior samples (keeps z' on the decoder's manifold). Same CLIP pseudo-classes and "
         "metrics as Task 1, so the two are directly comparable. Budget: ~4 h. Outputs: `MyDrive/Cocogoat/runs/task3/`.",
         [
-            """# 4) GPU smoke test (tiny models, a few steps)
+            """# 4) GPU smoke test (tiny models, a few steps, always from scratch)
 !python -m cocogoat.tasks.task3_latent_gan --smoke --dataset genshin --run_dir /content/drive/MyDrive/Cocogoat/runs/task3_smoke --force""",
-            """# 5) VAE (1 h) then latent GAN (3 h); resumes automatically
-!python -m cocogoat.tasks.task3_latent_gan --dataset genshin""",
-            """# 6) Results
+            """# 5) Settings - edit freely. Training time budgets in hours: stage A = VAE, stage B = latent GAN.
+#    Quick test: small budgets AND a separate folder (e.g. '.../runs/task3_test'): the finished VAE stage is not
+#    extended later. (Raising GAN_HOURS on the same RUN_DIR does continue the GAN's training.)
+VAE_HOURS, GAN_HOURS = 1.0, 3.0
+RUN_DIR = '/content/drive/MyDrive/Cocogoat/runs/task3'""",
+            """# 6) VAE, then latent GAN (resumes automatically after a disconnect)
+!python -m cocogoat.tasks.task3_latent_gan --dataset genshin --vae_hours {VAE_HOURS} --hours {GAN_HOURS} --run_dir {RUN_DIR}""",
+            """# 7) Results
 from IPython.display import Image, Markdown, display
-run = '/content/drive/MyDrive/Cocogoat/runs/task3'
+run = RUN_DIR
 display(Markdown(open(f'{run}/gan/report.md').read()))
 display(Image(f'{run}/vae/samples/recon_final.png'))
 display(Image(f'{run}/gan/samples/final.png'))
@@ -174,14 +189,20 @@ display(Image(f'{run}/gan/samples/final_per_class.png'))""",
         "1024: KID/FID, patch-KID on native-resolution crops, precision/recall, CLIP score for text prompts. "
         "Outputs: `MyDrive/Cocogoat/runs/task4/`. Needs ~130 GB of the Colab disk (dataset + decoded arrays).",
         [
-            """# 4) GPU smoke test (tiny models on synthetic shards, a few steps)
+            """# 4) GPU smoke test (tiny models on synthetic shards, a few steps, always from scratch)
 !python -m cocogoat.tasks.task4_hires --smoke --run_dir /content/drive/MyDrive/Cocogoat/runs/task4_smoke --force""",
-            """# 5) Data (~20-30 min: 64 GB download + decode + CLIP embeddings), base GAN (7 h), SR (2.5 h), 1024 evaluation.
-#    Everything resumes: if Colab disconnects, Run all again (the data step re-downloads on a fresh VM).
-!python -m cocogoat.tasks.task4_hires""",
-            """# 6) Results
+            """# 5) Settings - edit freely. Training time budgets in hours (data/evaluation time not included).
+#    MAX_SHARDS: FFHQ shards of ~1,000 faces each; 0 = all 70 (~64 GB download, ~20-30 min with decoding).
+#    Quick test: e.g. MAX_SHARDS = 5 with small budgets, in a separate folder (e.g. '.../runs/task4_test').
+#    Raising BASE_HOURS / SR_HOURS later on the same RUN_DIR continues training from the checkpoints.
+MAX_SHARDS, BASE_HOURS, SR_HOURS = 0, 7.0, 2.5
+RUN_DIR = '/content/drive/MyDrive/Cocogoat/runs/task4'""",
+            """# 6) Data (download + decode + CLIP embeddings), base GAN, SR, 1024 evaluation. Everything resumes: if Colab
+#    disconnects, Run all again (the data step re-downloads on a fresh VM).
+!python -m cocogoat.tasks.task4_hires --max_shards {MAX_SHARDS} --base_hours {BASE_HOURS} --sr_hours {SR_HOURS} --run_dir {RUN_DIR}""",
+            """# 7) Results
 from IPython.display import Image, Markdown, display
-run = '/content/drive/MyDrive/Cocogoat/runs/task4'
+run = RUN_DIR
 display(Markdown(open(f'{run}/eval/report.md').read()))
 display(Image(f'{run}/eval/samples/prompts_grid.png'))
 display(Image(f'{run}/sr/samples/sr_final.png'))""",
@@ -196,13 +217,19 @@ display(Image(f'{run}/sr/samples/sr_final.png'))""",
         "modes: world model OFF -> 1024 px images, ON -> 1024 px videos (mp4 + GIF). Text prompts work through CLIP. "
         "Outputs: `MyDrive/Cocogoat/runs/task5/`.",
         [
-            """# 4) GPU smoke test (tiny models on synthetic clips)
+            """# 4) GPU smoke test (tiny models on synthetic clips, always from scratch)
 !python -m cocogoat.tasks.task5_world_gan --smoke --run_dir /content/drive/MyDrive/Cocogoat/runs/task5_smoke --force""",
-            """# 5) Data (~15-25 min), VAE (1.5 h), world-GAN (5.5 h), SR (2 h), evaluation + videos. Resumes automatically.
-!python -m cocogoat.tasks.task5_world_gan""",
-            """# 6) Results
+            """# 5) Settings - edit freely. Training time budgets in hours (data/evaluation time not included).
+#    MAX_CLIPS: Inter4K clips to use; 0 = all 1,000 (~15-25 min to download and decode).
+#    Quick test: e.g. MAX_CLIPS = 100 with small budgets, in a separate folder (e.g. '.../runs/task5_test'):
+#    the finished VAE stage is not extended later. (Raising GAN_HOURS / SR_HOURS on the same RUN_DIR continues them.)
+MAX_CLIPS, VAE_HOURS, GAN_HOURS, SR_HOURS = 0, 1.5, 5.5, 2.0
+RUN_DIR = '/content/drive/MyDrive/Cocogoat/runs/task5'""",
+            """# 6) Data, VAE, world-GAN, SR, evaluation + videos (resumes automatically after a disconnect)
+!python -m cocogoat.tasks.task5_world_gan --max_clips {MAX_CLIPS} --vae_hours {VAE_HOURS} --gan_hours {GAN_HOURS} --sr_hours {SR_HOURS} --run_dir {RUN_DIR}""",
+            """# 7) Results
 from IPython.display import Image, Markdown, Video, display
-run = '/content/drive/MyDrive/Cocogoat/runs/task5'
+run = RUN_DIR
 display(Markdown(open(f'{run}/eval/report.md').read()))
 display(Image(f'{run}/eval/samples/prompts_images.png'))
 display(Image(f'{run}/eval/videos/prompt0.gif'))""",
