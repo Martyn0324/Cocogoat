@@ -74,12 +74,12 @@ def notebook(title: str, description: str, run_cells: list[str]) -> dict:
 NOTEBOOKS = {
     "00_probe.ipynb": notebook(
         "Probe (environment, data, datasets, pretrained weights)",
-        "Short run (~15-25 min). Checks the GPU, benchmarks a few kernels, inspects `MyDrive/Cocogoat/data/`, "
+        "Short run (~15-25 min). Checks the GPU, benchmarks a few kernels, inspects your datasets in `MyDrive/Python/Projects/GANs/` (and `MyDrive/Cocogoat/data/` if present), "
         "lists candidate Hugging Face datasets and tests every pretrained-weight download the project needs. "
         "Writes `MyDrive/Cocogoat/runs/probe/report.md` (+ preview images).",
         [
             """# 4) Optional: a Hugging Face token (Colab 'Secrets' panel, name HF_TOKEN) is only needed for gated datasets.
-!python -m cocogoat.tasks.probe --data_dir /content/drive/MyDrive/Cocogoat/data --out /content/drive/MyDrive/Cocogoat/runs/probe""",
+!python -m cocogoat.tasks.probe --data_dir /content/drive/MyDrive/Python/Projects/GANs /content/drive/MyDrive/Cocogoat/data --out /content/drive/MyDrive/Cocogoat/runs/probe""",
             """# 5) Show the report
 from IPython.display import Markdown, display
 display(Markdown(open('/content/drive/MyDrive/Cocogoat/runs/probe/report.md').read()))""",

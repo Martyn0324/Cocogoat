@@ -5,8 +5,7 @@ plus a readable ``report.md`` (and a few preview images) to ``--out``.  Every
 section is isolated: a failure is recorded in the report instead of aborting.
 
 Usage (Colab):
-    python -m cocogoat.tasks.probe --data_dir /content/drive/MyDrive/Cocogoat/data \
-        --out /content/drive/MyDrive/Cocogoat/runs/probe
+    python -m cocogoat.tasks.probe --out /content/drive/MyDrive/Cocogoat/runs/probe
 """
 
 from __future__ import annotations
@@ -216,35 +215,40 @@ def probe_gpu():
 
 
 @section("drive_data")
-def probe_drive_data(data_dir: Path, out_dir: Path):
-    res = {"data_dir": str(data_dir), "exists": data_dir.exists(), "files": []}
-    if not data_dir.exists():
-        print(f"{data_dir} does not exist")
-        return res
-    for p in sorted(data_dir.rglob("*")):
+def probe_drive_data(data_dirs: list[Path], out_dir: Path):
+    res = {"data_dirs": {str(d): d.exists() for d in data_dirs}, "files": []}
+    paths = []
+    for data_dir in data_dirs:
+        if not data_dir.exists():
+            print(f"{data_dir} does not exist")
+            continue
+        paths += [(data_dir, p) for p in sorted(data_dir.rglob("*"))]
+    for data_dir, p in paths:
         if not p.is_file():
             continue
-        entry = {"path": str(p.relative_to(data_dir)), "size": _human(p.stat().st_size)}
+        entry = {"path": str(p), "size": _human(p.stat().st_size)}
         suffix = p.suffix.lower()
         try:
             if suffix == ".npy":
                 arr = np.load(p, mmap_mode="r")
                 entry.update(shape=list(arr.shape), dtype=str(arr.dtype))
-                sample = np.asarray(arr[: min(16, len(arr))])
+                idx = np.linspace(0, len(arr) - 1, min(16, len(arr))).astype(int)
+                sample = np.asarray(arr[idx])
                 entry.update(sample_min=float(sample.min()), sample_max=float(sample.max()))
                 _save_grid(_to_uint8_hwc(sample), out_dir / f"preview_{p.stem}.png")
             elif suffix == ".npz":
-                with np.load(p, allow_pickle=False) as z:
-                    keys = {}
-                    for k in z.files:
-                        arr = z[k]
-                        keys[k] = {"shape": list(arr.shape), "dtype": str(arr.dtype)}
-                        if arr.dtype != object and arr.size > 0 and arr.ndim >= 3:
-                            flat = arr.reshape(-1, *arr.shape[-3:]) if arr.ndim > 4 else arr
-                            sample = np.asarray(flat[: min(16, len(flat))])
-                            keys[k].update(sample_min=float(sample.min()), sample_max=float(sample.max()))
-                            _save_grid(_to_uint8_hwc(sample), out_dir / f"preview_{p.stem}_{k}.png")
-                    entry["arrays"] = keys
+                from cocogoat.data.arrays import iter_npz_member, npz_members
+
+                members = npz_members(p)  # header only, nothing decompressed
+                for k, meta in members.items():
+                    if len(meta["shape"]) >= 3 and not meta["fortran_order"]:
+                        first = next(iter_npz_member(p, k, chunk_items=64))
+                        flat = first.reshape(-1, *first.shape[-3:]) if first.ndim > 4 else first
+                        idx = np.linspace(0, len(flat) - 1, min(16, len(flat))).astype(int)
+                        sample = np.asarray(flat[idx])
+                        meta.update(sample_min=float(sample.min()), sample_max=float(sample.max()))
+                        _save_grid(_to_uint8_hwc(sample), out_dir / f"preview_{p.stem}_{k}.png")
+                entry["arrays"] = members
             elif suffix in (".mp4", ".mkv", ".webm", ".mov", ".avi"):
                 import cv2
 
@@ -474,7 +478,8 @@ def write_report(out_dir: Path) -> None:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--data_dir", default="/content/drive/MyDrive/Cocogoat/data")
+    ap.add_argument("--data_dir", nargs="+", default=["/content/drive/MyDrive/Python/Projects/GANs",
+                                                       "/content/drive/MyDrive/Cocogoat/data"])
     ap.add_argument("--out", default="/content/drive/MyDrive/Cocogoat/runs/probe")
     ap.add_argument("--skip", nargs="*", default=[], help="sections to skip: system gpu drive_data huggingface pretrained")
     args = ap.parse_args(argv)
@@ -486,7 +491,7 @@ def main(argv=None):
     if "gpu" not in args.skip:
         probe_gpu()
     if "drive_data" not in args.skip:
-        probe_drive_data(Path(args.data_dir), out_dir)
+        probe_drive_data([Path(d) for d in args.data_dir], out_dir)
     write_report(out_dir)  # partial report early, in case later sections hang
     if "huggingface" not in args.skip:
         probe_huggingface(out_dir)
