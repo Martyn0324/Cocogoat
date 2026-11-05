@@ -108,8 +108,8 @@ class Task2Config:
     rollout_k: int = 3
     rollout_weight: float = 0.5
     rollout_fraction: float = 0.25
-    eval_context: int = 8
-    eval_horizon: int = 8
+    eval_context: int = 64
+    eval_horizon: int = 64
     eval_clips: int = 256
     # cadence / misc
     log_every: int = 50
