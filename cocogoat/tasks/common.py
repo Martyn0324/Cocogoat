@@ -93,3 +93,45 @@ def np_load_or(path: Path, fn: Callable[[], np.ndarray]) -> np.ndarray:
     path.parent.mkdir(parents=True, exist_ok=True)
     np.save(path, arr)
     return arr
+
+
+def resume_or_skip(rd, requested_hours: float, force: bool = False) -> bool:
+    """True if the stage should be skipped.
+
+    A stage marked DONE is re-opened (DONE removed) when a *larger* time budget is requested,
+    so ``--hours`` can be raised to continue training; ``--force`` always re-opens it.
+    """
+    if not rd.done:
+        return False
+    import json as _json
+
+    try:
+        done_info = _json.loads((rd.path / "DONE").read_text() or "{}")
+    except ValueError:
+        done_info = {}
+    trained_budget = float(done_info.get("budget_hours", 0.0) or 0.0)
+    if force or requested_hours > trained_budget + 1e-6:
+        rd.print(f"re-opening finished stage (trained budget {trained_budget} h -> requested {requested_hours} h)")
+        (rd.path / "DONE").unlink()
+        return False
+    rd.print("stage already DONE (raise --hours to continue training, or use --force)")
+    return True
+
+
+def load_compatible(rd, modules: dict, state: dict | None) -> bool:
+    """Load state_dicts; if shapes/keys no longer match the current architecture, archive the
+    checkpoint and return False (caller starts fresh)."""
+    if state is None:
+        return False
+    try:
+        for name, module in modules.items():
+            module.load_state_dict(state[name])
+        return True
+    except (RuntimeError, KeyError) as exc:
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        src = rd.path / "ckpt" / "latest.pt"
+        if src.exists():
+            src.rename(rd.path / "ckpt" / f"incompatible_{stamp}.pt")
+        rd.print(f"checkpoint does not match the current architecture ({type(exc).__name__}); "
+                 f"archived as ckpt/incompatible_{stamp}.pt and starting fresh")
+        return False

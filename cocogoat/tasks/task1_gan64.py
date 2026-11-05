@@ -39,6 +39,8 @@ from cocogoat.tasks.common import (
     apply_overrides,
     make_feature_fn,
     parse_override,
+    load_compatible,
+    resume_or_skip,
     rotate_old_error,
     sample_labels,
     summarize_metrics_md,
@@ -206,8 +208,7 @@ def run(cfg: Task1Config) -> dict:
     rotate_old_error(run_path)
     rd = RunDir(run_path, config=cfg)
     with rd.capture_errors():
-        if rd.done and not cfg.force:
-            rd.print("stage already DONE (use --force to retrain)")
+        if resume_or_skip(rd, cfg.hours, cfg.force):
             return {}
         rd.print(f"env: {describe_env()}")
         images, labels, num_classes, label_source = load_data(cfg, rd, device)
@@ -237,12 +238,7 @@ def run(cfg: Task1Config) -> dict:
 
         step, nimg, best_fid, elapsed = 0, 0, float("inf"), 0.0
         state = rd.load_checkpoint()
-        if state is not None:
-            G.load_state_dict(state["G"])
-            D.load_state_dict(state["D"])
-            G_ema.load_state_dict(state["G_ema"])
-            opt_G.load_state_dict(state["opt_G"])
-            opt_D.load_state_dict(state["opt_D"])
+        if load_compatible(rd, {"G": G, "D": D, "G_ema": G_ema, "opt_G": opt_G, "opt_D": opt_D}, state):
             step, nimg, best_fid, elapsed = state["step"], state["nimg"], state["best_fid"], state["elapsed"]
             set_rng_state(state["rng"])
             rd.print(f"resumed at step {step}, {nimg / 1e6:.2f}M images, {elapsed / 3600:.2f} h")
@@ -403,6 +399,7 @@ def run(cfg: Task1Config) -> dict:
             with torch.no_grad(), autocast(device, cfg.amp):
                 save_grid(G_ema.model(z, cls).float(), rd.path / "samples" / "final_per_class.png", nrow=8)
         summary = {"final": final, "best_fid_periodic": best["metrics"].get("fid"), "steps": step,
+                   "budget_hours": cfg.hours,
                    "kimg": nimg / 1000, "hours": clock.now() / 3600, "num_classes": num_classes,
                    "label_source": label_source, "dataset": cfg.dataset, "G_params_M": count_params(G) / 1e6,
                    "D_params_M": count_params(D) / 1e6}

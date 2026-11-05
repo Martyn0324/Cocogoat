@@ -40,6 +40,8 @@ from cocogoat.tasks.common import (
     apply_overrides,
     make_feature_fn,
     parse_override,
+    load_compatible,
+    resume_or_skip,
     rotate_old_error,
     sample_labels,
     summarize_metrics_md,
@@ -198,8 +200,7 @@ def train_latent_gan(cfg: Task3Config, vae_path: Path, images: np.ndarray, label
                      num_classes: int, label_source: str, device: torch.device, run_dir: Path) -> dict:
     rd = RunDir(run_dir, config=cfg)
     with rd.capture_errors():
-        if rd.done and not cfg.force:
-            rd.print("latent GAN stage already DONE")
+        if resume_or_skip(rd, cfg.hours, cfg.force):
             return {}
         vae = load_vae(str(vae_path), device).requires_grad_(False).eval()
         lc, ls = vae.cfg.latent_channels, cfg.resolution // vae.cfg.downsample
@@ -253,14 +254,8 @@ def train_latent_gan(cfg: Task3Config, vae_path: Path, images: np.ndarray, label
 
         step, nimg, best_fid, elapsed = 0, 0, float("inf"), 0.0
         st = rd.load_checkpoint()
-        if st is not None:
-            G.load_state_dict(st["G"])
-            D_img.load_state_dict(st["D_img"])
-            D_lat.load_state_dict(st["D_lat"])
-            G_ema.load_state_dict(st["G_ema"])
-            opt_G.load_state_dict(st["opt_G"])
-            opt_Di.load_state_dict(st["opt_Di"])
-            opt_Dl.load_state_dict(st["opt_Dl"])
+        if load_compatible(rd, {"G": G, "D_img": D_img, "D_lat": D_lat, "G_ema": G_ema, "opt_G": opt_G,
+                                "opt_Di": opt_Di, "opt_Dl": opt_Dl}, st):
             step, nimg, best_fid, elapsed = st["step"], st["nimg"], st["best_fid"], st["elapsed"]
             set_rng_state(st["rng"])
             rd.print(f"resumed latent GAN at step {step}")
@@ -449,7 +444,7 @@ def train_latent_gan(cfg: Task3Config, vae_path: Path, images: np.ndarray, label
             vae_metrics = json.loads(vm.read_text())
         summary = {"final": final, "vae": {k: vae_metrics.get(k) for k in ("psnr", "ssim", "lpips", "rfid")},
                    "steps": step, "kimg": nimg / 1000, "hours": clock.now() / 3600, "num_classes": num_classes,
-                   "label_source": label_source}
+                   "label_source": label_source, "budget_hours": cfg.hours}
         rd.write_json("final_metrics.json", summary)
         (rd.path / "report.md").write_text(summarize_metrics_md(
             "Task 3 - latent GAN final metrics",
