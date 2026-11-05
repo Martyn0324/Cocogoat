@@ -142,6 +142,28 @@ for ds in ['mmnist', 'shelter']:
         print(ds, 'not finished:', exc)""",
         ],
     ),
+
+    "03_task3_latent_gan.ipynb": notebook(
+        "Task 3: class-conditional latent GAN (z -> G -> z' -> Decoder -> D)",
+        "Stage A trains a beta-VAE on the Genshin set (1 h) and freezes it. Stage B trains a generator that works "
+        "entirely in latent space (noise with the latent's shape -> displacement z' = z + G(z, class)), decoded by "
+        "the frozen decoder and judged by two critics: an image critic on decoded fakes vs *decoded reals* and a "
+        "latent critic on z' vs posterior samples (keeps z' on the decoder's manifold). Same CLIP pseudo-classes and "
+        "metrics as Task 1, so the two are directly comparable. Budget: ~4 h. Outputs: `MyDrive/Cocogoat/runs/task3/`.",
+        [
+            """# 4) GPU smoke test (tiny models, a few steps)
+!python -m cocogoat.tasks.task3_latent_gan --smoke --dataset genshin --run_dir /content/drive/MyDrive/Cocogoat/runs/task3_smoke --force""",
+            """# 5) VAE (1 h) then latent GAN (3 h); resumes automatically
+!python -m cocogoat.tasks.task3_latent_gan --dataset genshin""",
+            """# 6) Results
+from IPython.display import Image, Markdown, display
+run = '/content/drive/MyDrive/Cocogoat/runs/task3'
+display(Markdown(open(f'{run}/gan/report.md').read()))
+display(Image(f'{run}/vae/samples/recon_final.png'))
+display(Image(f'{run}/gan/samples/final.png'))
+display(Image(f'{run}/gan/samples/final_per_class.png'))""",
+        ],
+    ),
 }
 
 

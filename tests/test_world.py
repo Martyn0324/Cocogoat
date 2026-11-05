@@ -71,3 +71,13 @@ def test_psnr_ssim():
     assert torch.all(psnr(x, x) > 90)
     assert torch.allclose(ssim(x, x), torch.ones(2), atol=1e-4)
     assert torch.all(ssim(x, -x) < 0.5)
+
+
+def test_latent_generator_residual_identity_and_conditioning():
+    from cocogoat.models.latent_gan import LatentGenerator, LatentGeneratorConfig
+
+    g = LatentGenerator(LatentGeneratorConfig(latent_channels=4, latent_size=4, z_global_dim=8, w_dim=16, cond_dim=8,
+                                              num_classes=3, width=16, depth=2, heads=2, expansion=2.0))
+    z = torch.randn(5, 4, 4, 4)
+    out = g(z, torch.randn(5, 8), torch.randint(0, 3, (5,)))
+    assert out.shape == z.shape and torch.allclose(out, z)  # zero-init output => z' = z at init
