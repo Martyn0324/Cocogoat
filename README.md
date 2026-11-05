@@ -1,4 +1,38 @@
-# Cocogoat - A Progressive DCGAN
+# Cocogoat
+
+## 2026 revival: modern GANs, latent GANs and latent world models
+
+Four years after the first Cocogoat (a progressive DCGAN), this branch rebuilds the project with what GAN research
+has learned since: the R3GAN objective (relativistic pairing loss + R1 + R2), normalization-free depthwise-separable
+blocks, attention with QK-norm, latent-space generation, projected discriminators, and adversarial latent world
+models. Everything is trained from scratch; the only pretrained networks used are *embedding / classification*
+models (CLIP, DINOv2, InceptionV3 for metrics, VGG for LPIPS). No pretrained generative model is used anywhere.
+
+| # | Task | Data | Highlights | Notebook |
+|---|------|------|------------|----------|
+| 1 | GAN 64x64 with minimal mode collapse | Genshin fan-art (45,935 images) | RpGAN+R1+R2, depthwise inverted bottlenecks, attention, CLIP k-means pseudo-classes (cluster-conditioned GAN), DiffAugment, FID/KID/precision/recall | `notebooks/01_task1_gan64.ipynb` |
+| 2 | VAE + world model (next-latent prediction) | Colored Moving MNIST, Shelter music video (64x64) | per-frame beta-VAE (PixelUnshuffle + DC-AE shortcuts, EQ-VAE term, adversarial fine-tuning), space-time transformer with EMA memory, rollout metrics vs copy-last baseline | `notebooks/02_task2_vae_world_model.ipynb` |
+| 3 | Latent GAN `z -> G -> z' -> Decoder -> D` | Genshin fan-art (64x64), CLIP pseudo-classes | generator in latent space with OT penalty, image critic on *decoded* reals vs decoded fakes, latent critic on `z'` | `notebooks/03_task3_latent_gan.ipynb` |
+| 4 | Prompt-conditional 1024x1024 in ~10 h | FFHQ-1024 | CLIP-conditioned base GAN at 256 (language-free LAFITE training), pixel + DINOv2-projected critics, x4 SR GAN from scratch, KID + patch-KID + CLIP score | `notebooks/04_task4_hires_1024.ipynb` |
+| 5 | Latent world-GAN at 1024 (image + video) | Inter4K (1,000 4K clips) | latent image GAN + stochastic adversarial world model (self-forced rollouts, temporal critic), world-model toggle, SR to 1024, mp4 videos | `notebooks/05_task5_world_gan_1024.ipynb` |
+
+**How to run (Google Colab, G4 / RTX PRO 6000):** open a notebook from this branch on Colab, choose the G4 runtime
+and *Run all*. Each notebook clones the branch, runs a short GPU smoke test, then trains with a time budget.
+Checkpoints, metrics (`metrics.jsonl`, `final_metrics.json`, `report.md`), sample grids and logs go to
+`MyDrive/Cocogoat/runs/<task>/`; after a disconnect, *Run all* resumes from the last checkpoint. Run
+`notebooks/00_probe.ipynb` first on a new machine to check the GPU, datasets and pretrained downloads.
+
+**Code layout:** `cocogoat/nn` (blocks), `cocogoat/losses` (RpGAN, R1/R2, LPIPS), `cocogoat/data` (datasets,
+DiffAugment, pseudo-labels), `cocogoat/metrics` (FID/KID/PR, PSNR/SSIM/LPIPS), `cocogoat/models` (GAN, VAE, world
+model, latent GAN, projected critic, SR), `cocogoat/train` (adversarial trainer, EMA, schedules, checkpoints),
+`cocogoat/tasks` (one entry point per task), `tests/` (CPU unit tests: `python -m pytest tests`). The design
+document is `docs/superpowers/specs/2026-11-05-cocogoat-revival-design.md`.
+
+Results are added below as runs finish.
+
+---
+
+# Cocogoat - A Progressive DCGAN (2022)
 Progressive DCGAN created on Pytorch, based on many different codes. The only originality here is the name and the DatasetCreator class and the prototype file...perhaps the AI to label the dataset, too, but I'm pretty sure that, though I didn't see anyone using this tactic to label a big dataset, I'm not the first one using it.
 
 The name Cocogoat it's because I've been testing this code initially using a dataset of 10.000 images of Ganyu from Genshin Impact.
