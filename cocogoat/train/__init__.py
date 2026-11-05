@@ -11,6 +11,7 @@ from .utils import (  # noqa: F401
     log_cosine_interp,
     rng_state,
     save_grid,
+    save_video_gif,
     save_images,
     seed_everything,
     set_optimizer_hparams,

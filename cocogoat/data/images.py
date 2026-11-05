@@ -82,6 +82,15 @@ def resize_uint8(arr: np.ndarray, res: int, batch: int = 2048, device: str | tor
     return out
 
 
+def cache_looks_valid(arr: np.ndarray, n_samples: int = 64) -> bool:
+    """False for a uint8 cache whose pixels never exceed 15 (frames sampled across the file):
+    the signature of float data converted with the wrong value range (near-black images)."""
+    if len(arr) == 0:
+        return False
+    idx = np.unique(np.linspace(0, len(arr) - 1, n_samples).astype(np.int64))
+    return int(np.asarray(arr[idx]).max()) > 15
+
+
 def load_array_images(path: str | Path, key: str | None = None, cache_dir: str | Path | None = DEFAULT_CACHE,
                       drive_cache: str | Path | None = None, chunk: int = 1024) -> np.ndarray:
     """Load images from .npy / .npz (any common layout/dtype) as a uint8 NHWC array.
@@ -91,13 +100,18 @@ def load_array_images(path: str | Path, key: str | None = None, cache_dir: str |
     if given, ``drive_cache`` (persistent across Colab sessions).  Returns a read-only
     memory map of the cached uint8 file.  5-D arrays (videos) are flattened to frames.
     """
-    from cocogoat.data.arrays import chunk_to_uint8, detect_value_range, iter_array
+    from cocogoat.data.arrays import channels_last, chunk_to_uint8, iter_array, scan_value_range, uint8_conversion
 
     path = Path(path)
     tag = f"{path.stem}{'_' + key if key else ''}_u8.npy"
     for cdir in (cache_dir, drive_cache):
         if cdir is not None and (Path(cdir) / tag).exists():
             arr = np.load(Path(cdir) / tag, mmap_mode="r")
+            if not cache_looks_valid(arr):
+                print(f"{Path(cdir) / tag}: pixel values never exceed 15 - a cache written by an older, "
+                      f"faulty range conversion; rebuilding it", flush=True)
+                (Path(cdir) / tag).unlink()
+                continue
             if cdir == drive_cache and cache_dir is not None:
                 local = localize(Path(cdir) / tag, cache_dir)
                 arr = np.load(local, mmap_mode="r")
@@ -111,14 +125,19 @@ def load_array_images(path: str | Path, key: str | None = None, cache_dir: str |
         src = tmp_copy = localize(path, Path(cache_dir) / "_src")
     shape, dtype, chunks = iter_array(src, key, chunk_items=chunk)
     n_items = int(np.prod(shape[:2])) if len(shape) == 5 else shape[0]
-    out, i, value_range = None, 0, None
+    conversion = None
+    if dtype != np.uint8:
+        lo, hi = scan_value_range(src, key, chunk_items=chunk)
+        conversion = uint8_conversion(lo, hi)
+        print(f"{path.name}: shape={shape} dtype={dtype} per-channel min={np.round(lo, 4).tolist()} "
+              f"max={np.round(hi, 4).tolist()} -> {conversion['name']} conversion", flush=True)
+    else:
+        print(f"{path.name}: shape={shape} dtype=uint8", flush=True)
+    out, i = None, 0
     for ch in chunks:
         if ch.ndim == 5:
             ch = ch.reshape(-1, *ch.shape[2:])
-        if value_range is None:
-            value_range = detect_value_range(ch[: min(len(ch), 512)])
-            print(f"{path.name}: shape={shape} dtype={dtype} detected range={value_range}", flush=True)
-        u8 = to_uint8_nhwc(chunk_to_uint8(ch, value_range))
+        u8 = to_uint8_nhwc(chunk_to_uint8(channels_last(ch), conversion))
         if out is None:
             tmp = target.with_suffix(".npy.part")
             out = np.lib.format.open_memmap(tmp, mode="w+", dtype=np.uint8, shape=(n_items,) + u8.shape[1:])
@@ -126,6 +145,9 @@ def load_array_images(path: str | Path, key: str | None = None, cache_dir: str |
         i += len(u8)
     assert out is not None and i == n_items, (i, n_items)
     out.flush()
+    if not cache_looks_valid(out):
+        raise ValueError(f"{path.name}: after conversion no sampled pixel exceeds 15 of 255 - the images are "
+                         f"(almost) black; check the array's contents (dtype {dtype})")
     del out
     import os as _os
 

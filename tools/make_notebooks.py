@@ -141,7 +141,9 @@ RUN_ROOT = '/content/drive/MyDrive/Cocogoat/runs/task2'
 EVAL_CONTEXT, EVAL_HORIZON = 64, 64
 # Shelter: drop the black intro (the anime starts around frame 500); 0 keeps every frame.
 SHELTER_START_FRAME = 500
-EVAL = f'--eval_context {EVAL_CONTEXT} --eval_horizon {EVAL_HORIZON}'""",
+# Rollouts are also saved as animated GIFs (samples/rollout_*.gif): GIF_CLIPS clips side by side, 0 = no GIF.
+GIF_CLIPS, GIF_FPS = 4, 8
+EVAL = f'--eval_context {EVAL_CONTEXT} --eval_horizon {EVAL_HORIZON} --gif_clips {GIF_CLIPS} --gif_fps {GIF_FPS}'""",
             """# 6) Colored Moving MNIST: VAE, then world model (resumes automatically after a disconnect)
 !python -m cocogoat.tasks.task2_world --dataset mmnist --vae_hours {VAE_HOURS} --wm_hours {WM_HOURS} --run_root {RUN_ROOT} {EVAL}""",
             """# 7) Shelter (your anime music-video frames): VAE, then world model

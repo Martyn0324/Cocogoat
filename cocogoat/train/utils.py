@@ -302,6 +302,40 @@ def save_grid(images: torch.Tensor, path: str | Path, nrow: int = 8, max_side: i
     pil.save(path)
 
 
+def save_video_gif(videos: torch.Tensor, path: str | Path, nrow: int = 4, fps: float = 8.0,
+                   borders: torch.Tensor | None = None, border: int = 2, max_side: int = 1024) -> None:
+    """Save videos as one animated GIF in which every frame is a grid of the videos' frames.
+
+    ``videos``: (N, T, C, H, W) in [-1, 1]. ``borders``: optional (N, T, 3) uint8 RGB colours of a
+    ``border``-pixel frame drawn around each tile (e.g. to mark real vs generated frames).
+    """
+    from PIL import Image
+
+    n, t, c, h, w = videos.shape
+    v = to_uint8(videos.flatten(0, 1)).view(n, t, c, h, w).cpu()
+    if c == 1:
+        v = v.expand(-1, -1, 3, -1, -1)
+    if borders is not None:
+        b = border
+        canvas = borders.to(torch.uint8).cpu()[:, :, :, None, None].expand(n, t, 3, h + 2 * b, w + 2 * b).clone()
+        canvas[:, :, :, b:b + h, b:b + w] = v[:, :, :3]
+        v, h, w = canvas, h + 2 * b, w + 2 * b
+    ncol = min(nrow, n)
+    nrows = math.ceil(n / ncol)
+    grid = torch.zeros((t, 3, nrows * h, ncol * w), dtype=torch.uint8)
+    for i in range(n):
+        r, cc = divmod(i, ncol)
+        grid[:, :, r * h:(r + 1) * h, cc * w:(cc + 1) * w] = v[i, :, :3]
+    frames = [Image.fromarray(f.permute(1, 2, 0).numpy()) for f in grid]
+    side = max(frames[0].size)
+    if side > max_side:
+        s = max_side / side
+        size = (max(1, int(frames[0].size[0] * s)), max(1, int(frames[0].size[1] * s)))
+        frames = [f.resize(size, Image.LANCZOS) for f in frames]
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    frames[0].save(path, save_all=True, append_images=frames[1:], duration=max(20, int(round(1000 / fps))), loop=0)
+
+
 def save_images(images: torch.Tensor, folder: str | Path, prefix: str = "img") -> None:
     from PIL import Image
 

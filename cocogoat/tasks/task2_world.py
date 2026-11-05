@@ -59,6 +59,7 @@ from cocogoat.train import (
     describe_env,
     rng_state,
     save_grid,
+    save_video_gif,
     seed_everything,
     set_optimizer_hparams,
     set_rng_state,
@@ -113,6 +114,8 @@ class Task2Config:
     eval_clips: int = 256                   # held-out clips (capped so all of them fit in memory)
     eval_batch: int = 64                    # clips rolled out together (capped for long horizons)
     start_frame: int = 0                    # video datasets: drop the first N frames (e.g. Shelter's black intro)
+    gif_clips: int = 4                      # evaluation rollouts also saved as an animated GIF (0 = none)
+    gif_fps: float = 8.0
     # cadence / misc
     log_every: int = 50
     eval_minutes: float = 15.0
@@ -531,7 +534,7 @@ def evaluate_world_model(cfg: Task2Config, vae: VAE, wm: WorldModel, clips: torc
         per_clip["model_lpips"].append(lp(flat(x_pred), flat(x_gt)).view(bsz, h))
         per_clip["copy_lpips"].append(lp(flat(x_copy), flat(x_gt)).view(bsz, h))
         if not strips:
-            for j in range(min(4, bsz)):
+            for j in range(min(max(4, cfg.gif_clips), bsz)):
                 strips += [x[j, :c].cpu(), x_gt[j].cpu(), x_pred[j].cpu()]
     for k in res:
         res[k] = torch.cat(per_clip[k]).mean(0).tolist()  # per-horizon averages
@@ -541,7 +544,18 @@ def evaluate_world_model(cfg: Task2Config, vae: VAE, wm: WorldModel, clips: torc
         ctx, gt, pr = strips[j:j + 3]
         rows += [torch.cat([ctx, gt]), torch.cat([ctx, pr])]
     if rows:
-        save_grid(torch.cat(rows), rd.path / "samples" / f"rollout_{tag}.png", nrow=c + h, max_side=8192)
+        save_grid(torch.cat(rows[:8]), rd.path / "samples" / f"rollout_{tag}.png", nrow=c + h, max_side=8192)
+    n_gif = min(cfg.gif_clips, len(rows) // 2)
+    if n_gif:
+        # one column per clip: top = real video, bottom = context + world-model rollout.
+        # Border: grey = real frame, green = context given to the model, red = generated frame.
+        vids = torch.stack(rows[0:2 * n_gif:2] + rows[1:2 * n_gif:2])  # (2*n, c+h, 3, H, W)
+        colours = torch.zeros(2 * n_gif, c + h, 3, dtype=torch.uint8)
+        colours[:n_gif] = torch.tensor([128, 128, 128], dtype=torch.uint8)
+        colours[n_gif:, :c] = torch.tensor([0, 200, 0], dtype=torch.uint8)
+        colours[n_gif:, c:] = torch.tensor([220, 0, 0], dtype=torch.uint8)
+        save_video_gif(vids, rd.path / "samples" / f"rollout_{tag}.gif", nrow=n_gif, fps=cfg.gif_fps,
+                       borders=colours)
     res["context"], res["horizon"] = c, h
     return res
 
@@ -605,6 +619,8 @@ def main(argv=None):
     ap.add_argument("--eval_clips", type=int, default=None)
     ap.add_argument("--eval_batch", type=int, default=None, help="clips generated together")
     ap.add_argument("--start_frame", type=int, default=None, help="drop the first N frames of a video dataset")
+    ap.add_argument("--gif_clips", type=int, default=None, help="evaluation clips saved as an animated GIF (0 = none)")
+    ap.add_argument("--gif_fps", type=float, default=None, help="frame rate of the evaluation GIFs")
     ap.add_argument("--override", default=None)
     args = ap.parse_args(argv)
     cfg = Task2Config()
@@ -616,7 +632,7 @@ def main(argv=None):
             setattr(cfg, k, v)
     if cfg.dataset == "mmnist" and not args.smoke:
         cfg.clip_len, cfg.eval_context, cfg.eval_horizon = 20, 10, 10
-    for k in ["eval_context", "eval_horizon", "eval_clips", "eval_batch", "start_frame"]:
+    for k in ["eval_context", "eval_horizon", "eval_clips", "eval_batch", "start_frame", "gif_clips", "gif_fps"]:
         v = getattr(args, k)
         if v is not None:
             setattr(cfg, k, v)
