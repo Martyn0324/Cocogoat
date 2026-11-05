@@ -115,3 +115,25 @@ def test_bulk_vae_passes_are_sized_by_pixels(monkeypatch):
     zg = zn.clone().requires_grad_(True)                               # training path: one pass, graph intact
     vae.decode_normalized(zg).mean().backward()
     assert seen["dec"] == [20] and zg.grad is not None
+
+
+def test_eval_length_shrinks_to_the_held_out_shots():
+    import numpy as np
+
+    from cocogoat.data.video import ClipBank
+    from cocogoat.tasks.task2_world import Task2Config, fit_eval_length
+
+    class _Log:
+        def print(self, *a):
+            pass
+
+    seg = np.repeat(np.arange(10), 40)  # ten 40-frame shots
+    bank = ClipBank(np.zeros((400, 8, 8, 3), np.uint8), seg, "cpu")
+    cfg = Task2Config()
+    cfg.eval_context, cfg.eval_horizon, cfg.clip_stride = 64, 64, 1
+    fit_eval_length(cfg, bank, _Log())
+    assert cfg.eval_context + cfg.eval_horizon <= 40 and abs(cfg.eval_context - cfg.eval_horizon) <= 1
+    assert len(bank.valid_starts(cfg.eval_context + cfg.eval_horizon, 1)) >= 16
+    cfg.eval_context, cfg.eval_horizon = 4, 8  # fits: unchanged
+    fit_eval_length(cfg, bank, _Log())
+    assert (cfg.eval_context, cfg.eval_horizon) == (4, 8)

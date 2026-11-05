@@ -377,6 +377,35 @@ def decode_latents(vae: VAE, z: torch.Tensor, amp: bool, device) -> torch.Tensor
     return x.float().clamp(-1, 1).view(b, t, *x.shape[1:])
 
 
+def fit_eval_length(cfg: Task2Config, test: ClipBank, rd: RunDir, min_clips: int = 16) -> None:
+    """Shorten eval_context + eval_horizon when the held-out shots are shorter than that.
+
+    Evaluation needs ground-truth frames for every generated frame, so a clip may not cross a scene
+    cut. If too few cut-free held-out clips of the requested length exist, the longest length with at
+    least ``min_clips`` clips (or the longest possible) is used, split between context and horizon in
+    the requested proportion.
+    """
+    c, h = cfg.eval_context, cfg.eval_horizon
+    want = min(cfg.eval_clips, min_clips)
+    n = lambda length: len(test.valid_starts(length, cfg.clip_stride))  # noqa: E731
+    if n(c + h) >= want:
+        return
+    lengths = [L for L in range(c + h - 1, 1, -1) if n(L) > 0]
+    if not lengths:
+        raise ValueError("no held-out clip has even 2 frames without a scene cut")
+    good = [L for L in lengths if n(L) >= want]
+    L = good[0] if good else lengths[0]
+    if n(c + h) > 0 and L < c + h and not good:
+        return  # some clips of the requested length exist and no shorter length helps
+    new_c = min(c, max(1, round(L * c / (c + h))))
+    new_h = L - new_c
+    if new_h < 1:
+        new_c, new_h = L - 1, 1
+    rd.print(f"WARNING: only {n(c + h)} held-out clips have {c + h} frames without a scene cut; evaluating with "
+             f"eval_context {new_c} + eval_horizon {new_h} ({n(L)} clips) instead of {c} + {h}")
+    cfg.eval_context, cfg.eval_horizon = new_c, new_h
+
+
 def train_world_model(cfg: Task2Config, vae_path: Path, train: ClipBank, test: ClipBank, device: torch.device,
                       run_dir: Path) -> dict:
     rd = RunDir(run_dir, config=cfg)
@@ -403,12 +432,9 @@ def train_world_model(cfg: Task2Config, vae_path: Path, train: ClipBank, test: C
             step, elapsed, best = st["step"], st["elapsed"], st.get("best", best)
             set_rng_state(st["rng"])
             rd.print(f"resumed world model at step {step}")
+        fit_eval_length(cfg, test, rd)
         eval_len = cfg.eval_context + cfg.eval_horizon
         n_avail = len(test.valid_starts(eval_len, cfg.clip_stride))
-        if n_avail == 0:
-            raise ValueError(f"no held-out clip has {eval_len} frames without a scene cut "
-                             f"(eval_context {cfg.eval_context} + eval_horizon {cfg.eval_horizon}); use a shorter "
-                             f"horizon")
         # clips are kept on the GPU as float: cap the total number of frames (~0.8 GB at 64 px)
         n_eval = max(1, min(cfg.eval_clips, n_avail, (16384 * 64 * 64) // (eval_len * cfg.resolution ** 2)))
         eval_clips = test.fixed_clips(n_eval, eval_len, cfg.clip_stride, seed=0)
