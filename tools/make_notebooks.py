@@ -173,6 +173,45 @@ for ds in ['mmnist', 'shelter']:
         ],
     ),
 
+    "02b_task2_1_ltm.ipynb": notebook(
+        "Task 2.1: surprise-gated long-term memory for the world model (A/B test)",
+        "Two world models on the frozen Task 2 VAE, identical except for one thing: `ltm` adds a bank of past frame "
+        "latents chosen by surprise (prediction error), read by cross-attention - the long-term memory of your "
+        "ViVAE notes. `base` is the Task 2 model (EMA memory) trained the same way: 64-frame clips, chunks of 16 "
+        "frames, rotary time positions. Moving MNIST is the smoke test; Shelter is the main experiment (clips cross "
+        "scene cuts there). Needs the Task 2 VAEs (`runs/task2/<dataset>/vae/vae.pt`), otherwise one is trained "
+        "first. Outputs: `MyDrive/Cocogoat/runs/task2_1/<dataset>/` (`compare.md`, `compare.png`, `<arm>/samples/`).",
+        [
+            """# 4) Smoke test (tiny models, a few steps, both arms, always from scratch)
+!python -m cocogoat.tasks.task2_1_ltm --smoke --dataset mmnist --run_root /content/drive/MyDrive/Cocogoat/runs/task2_1_smoke""",
+            """# 5) Settings - edit freely. WM_HOURS = training budget PER ARM (two arms per dataset).
+WM_HOURS = 0.75
+RUN_ROOT = '/content/drive/MyDrive/Cocogoat/runs/task2_1'
+TASK2_ROOT = '/content/drive/MyDrive/Cocogoat/runs/task2'   # frozen VAEs are taken from here
+LTM_SLOTS = 8                       # frames kept in the long-term memory
+EVAL_CONTEXT, EVAL_HORIZON = 64, 64  # real frames shown, then frames generated
+SHELTER_START_FRAME = 500           # must match the Task 2 run whose VAE is reused
+GIF_CLIPS, GIF_FPS = 4, 8
+COMMON = (f'--wm_hours {WM_HOURS} --run_root {RUN_ROOT} --ltm_slots {LTM_SLOTS} --eval_context {EVAL_CONTEXT} '
+          f'--eval_horizon {EVAL_HORIZON} --gif_clips {GIF_CLIPS} --gif_fps {GIF_FPS}')""",
+            """# 6) Moving MNIST (smoke-test dataset): base arm, then ltm arm, then the comparison
+!python -m cocogoat.tasks.task2_1_ltm --dataset mmnist {COMMON} --vae_from {TASK2_ROOT}/mmnist/vae/vae.pt""",
+            """# 7) Shelter (main experiment)
+!python -m cocogoat.tasks.task2_1_ltm --dataset shelter {COMMON} --vae_from {TASK2_ROOT}/shelter/vae/vae.pt --start_frame {SHELTER_START_FRAME}""",
+            """# 8) Results: table, PSNR/LPIPS-vs-horizon chart, rollout GIFs of both arms
+from IPython.display import Image, Markdown, display
+for ds in ['mmnist', 'shelter']:
+    run = f'{RUN_ROOT}/{ds}'
+    try:
+        display(Markdown(open(f'{run}/compare.md').read()))
+        display(Image(f'{run}/compare.png'))
+        for arm in ['base', 'ltm']:
+            display(Markdown(f'**{ds} / {arm}**'), Image(f'{run}/{arm}/samples/rollout_final.gif'))
+    except FileNotFoundError as exc:
+        print(ds, 'not finished:', exc)""",
+        ],
+    ),
+
     "03_task3_latent_gan.ipynb": notebook(
         "Task 3: class-conditional latent GAN (z -> G -> z' -> Decoder -> D)",
         "Stage A trains a beta-VAE on the Genshin set (1 h) and freezes it. Stage B trains a generator that works "

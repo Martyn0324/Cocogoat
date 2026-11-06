@@ -137,3 +137,95 @@ def test_eval_length_shrinks_to_the_held_out_shots():
     cfg.eval_context, cfg.eval_horizon = 4, 8  # fits: unchanged
     fit_eval_length(cfg, bank, _Log())
     assert (cfg.eval_context, cfg.eval_horizon) == (4, 8)
+
+
+def _chunked(slots: int, window: int = 4):
+    from cocogoat.models.ltm import ChunkedWorldModel, LTMConfig
+    from cocogoat.models.world import WorldModel, WorldModelConfig
+
+    torch.manual_seed(0)
+    cfg = WorldModelConfig(latent_channels=4, latent_size=4, dim=32, depth=2, heads=2, max_frames=2 * window,
+                           rope_time=True, ltm_every=1 if slots else 0)
+    wm = WorldModel(cfg).eval()
+    torch.nn.init.normal_(wm.head.weight, std=0.1)  # the output head is zero-initialised (no gradient flows at init)
+    if slots:  # make the memory read non-trivial (it is zero-initialised)
+        for blk in wm.ltm_blocks.values():
+            torch.nn.init.normal_(blk.proj.weight, std=0.1)
+    return ChunkedWorldModel(wm, LTMConfig(slots=slots, window=window))
+
+
+def test_chunked_teacher_forcing_matches_step_by_step_generation():
+    from cocogoat.models.world import ema_memory
+
+    runner = _chunked(slots=0)
+    z = torch.randn(2, 13, 4, 4, 4)
+    preds = []
+    runner.teacher_forced(z, z, backward_fn=lambda loss: preds.append(None))
+    # reference: predict frame t+1 one step at a time from frames [s - W, t], s = start of t's chunk
+    mem = ema_memory(z, runner.wm.cfg.ema_decays)
+    with torch.no_grad():
+        ref = torch.stack([runner.wm(z[:, max(0, 4 * (t // 4) - 4):t + 1],
+                                     memory=mem[:, max(0, 4 * (t // 4) - 4):t + 1])[:, -1] for t in range(12)], dim=1)
+        bank = runner.new_bank(z)
+        chunked = torch.cat([runner.step_chunk(z, mem, s, min(s + 4, 12), bank) for s in range(0, 12, 4)], dim=1)
+    assert torch.allclose(chunked, ref, atol=1e-5)
+    # rollout of one step equals the teacher-forced prediction of the next frame
+    with torch.no_grad():
+        one = runner.rollout(z[:, :9], 1)
+    assert torch.allclose(one[:, 0], ref[:, 8], atol=1e-5)
+
+
+def test_surprise_memory_keeps_the_most_surprising_frames():
+    from cocogoat.models.ltm import SurpriseMemory
+
+    bank = SurpriseMemory(1, 2, (1, 1, 1), decay=1.0, device="cpu")
+    z = torch.arange(5.0).view(1, 5, 1, 1, 1)
+    bank.write(z, torch.arange(5), torch.tensor([[0.1, 3.0, 0.2, 2.0, 0.5]]), now=4)
+    assert sorted(bank.z.flatten().tolist()) == [1.0, 3.0]
+    bank.write(z[:, :1] + 10, torch.tensor([5]), torch.tensor([[2.5]]), now=5)
+    assert sorted(bank.z.flatten().tolist()) == [1.0, 10.0]
+    # with decay, an old surprise loses to a slightly smaller fresh one
+    bank2 = SurpriseMemory(1, 1, (1, 1, 1), decay=0.5, device="cpu")
+    bank2.write(z[:, :1], torch.tensor([0]), torch.tensor([[1.0]]), now=0)
+    bank2.write(z[:, 1:2], torch.tensor([10]), torch.tensor([[0.5]]), now=10)
+    assert bank2.z.flatten().tolist() == [1.0]
+
+
+def test_long_term_memory_changes_predictions_and_gets_gradients():
+    runner = _chunked(slots=2)
+    z = torch.randn(2, 13, 4, 4, 4)
+    runner.teacher_forced(z, z, backward_fn=lambda loss: loss.backward())
+    g = sum(p.grad.abs().sum() for p in runner.wm.ltm_blocks.parameters() if p.grad is not None)
+    assert g > 0
+    assert runner.last_stats["ltm_fill"] == 1.0
+    with torch.no_grad():
+        a = runner.rollout(z[:, :9], 4)
+        runner.cfg.slots = 0  # same weights, memory read switched off
+        b = runner.rollout(z[:, :9], 4)
+    assert not torch.allclose(a, b)
+
+
+def test_memory_rollout_matches_teacher_forcing_at_chunk_boundaries():
+    """With memory on, the first generated frame equals the teacher-forced prediction (same bank, same context)."""
+    runner = _chunked(slots=2)
+    z = torch.randn(2, 13, 4, 4, 4)
+    from cocogoat.models.world import ema_memory
+
+    with torch.no_grad():
+        runner.teacher_forced(z, z)
+        for T0 in (5, 8, 9, 12):  # generation starts mid-chunk and at a chunk boundary
+            one = runner.rollout(z[:, :T0], 1)
+            # teacher-forced reference for the prediction made at frame T0-1
+            bank = runner.new_bank(z)
+            mem = ema_memory(z, runner.wm.cfg.ema_decays)
+            from cocogoat.models.ltm import surprise
+            ref = None
+            for start in range(0, 12, 4):
+                end = min(start + 4, 12)
+                pred = runner.step_chunk(z, mem, start, end, bank)
+                if start <= T0 - 1 < end:
+                    ref = pred[:, T0 - 1 - start]
+                    break
+                tgt = z[:, start + 1:end + 1]
+                bank.write(tgt, torch.arange(start + 1, end + 1), surprise(pred, tgt), now=end)
+            assert torch.allclose(one[:, 0], ref, atol=1e-5), T0
