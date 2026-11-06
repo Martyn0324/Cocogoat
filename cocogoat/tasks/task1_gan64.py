@@ -85,7 +85,9 @@ class Task1Config:
     max_steps: int = 0                  # >0: stop after this many steps (tests)
     lr: tuple = (2e-4, 5e-5)
     beta2: tuple = (0.9, 0.99)
-    gamma: tuple = (2.0, 0.2)
+    gamma: tuple = (2.0, 1.0)           # R1/R2 weight; the 3.5 h run diverged once gamma fell below ~0.3
+    gap_limit: float = 3.0              # smoothed D gap (real - fake logit) above this => back off gamma
+    gamma_backoff: float = 1.5          # ... by this factor (capped at gamma[0]); the raised floor is kept
     ema_kimg: tuple = (10.0, 300.0)
     aug_p: tuple = (0.2, 0.6)
     aug_policy: str = "color,translation,cutout"
@@ -99,7 +101,7 @@ class Task1Config:
     D: DiscriminatorConfig = field(default_factory=lambda: DiscriminatorConfig(expansion=dict(LIGHT_HIGH_RES)))
     log_every: int = 100
     sample_minutes: float = 15.0
-    eval_minutes: float = 45.0
+    eval_minutes: float = 20.0
     ckpt_minutes: float = 20.0
     eval_n: int = 10000
     final_eval_n: int = 50000
@@ -107,6 +109,7 @@ class Task1Config:
     seed: int = 0
     device: str | None = None
     force: bool = False
+    eval_best: bool = False             # only evaluate ckpt/best_G_ema.pt of an existing run (no training)
 
 
 def smoke_config(cfg: Task1Config) -> Task1Config:
@@ -209,7 +212,7 @@ def run(cfg: Task1Config) -> dict:
     rotate_old_error(run_path)
     rd = RunDir(run_path, config=cfg)
     with rd.capture_errors():
-        if resume_or_skip(rd, cfg.hours, cfg.force):
+        if not cfg.eval_best and resume_or_skip(rd, cfg.hours, cfg.force):
             return {}
         rd.print(f"env: {describe_env()}")
         images, labels, num_classes, label_source = load_data(cfg, rd, device)
@@ -240,9 +243,11 @@ def run(cfg: Task1Config) -> dict:
             rd.print("torch.compile enabled for G and D (first steps include compilation)")
 
         step, nimg, best_fid, elapsed = 0, 0, float("inf"), 0.0
+        gamma_hold, gap_ema = 0.0, None
         state = rd.load_checkpoint()
         if load_compatible(rd, {"G": G, "D": D, "G_ema": G_ema, "opt_G": opt_G, "opt_D": opt_D}, state):
             step, nimg, best_fid, elapsed = state["step"], state["nimg"], state["best_fid"], state["elapsed"]
+            gamma_hold = state.get("gamma_hold", 0.0)
             set_rng_state(state["rng"])
             rd.print(f"resumed at step {step}, {nimg / 1e6:.2f}M images, {elapsed / 3600:.2f} h")
 
@@ -278,10 +283,11 @@ def run(cfg: Task1Config) -> dict:
             rd.save_checkpoint({"G": G.state_dict(), "D": D.state_dict(), "G_ema": G_ema.state_dict(),
                                 "opt_G": opt_G.state_dict(), "opt_D": opt_D.state_dict(), "step": step,
                                 "nimg": nimg, "best_fid": best_fid, "elapsed": clock.now(), "rng": rng_state(),
+                                "gamma_hold": gamma_hold,
                                 "num_classes": num_classes, "label_source": label_source,
                                 "config": dataclasses.asdict(cfg)})
 
-        def evaluate(n: int, tag: str) -> dict:
+        def evaluate(n: int, tag: str, track_best: bool = True) -> dict:
             nonlocal best_fid
             G_ema.model.eval()
             t0 = time.time()
@@ -290,7 +296,7 @@ def run(cfg: Task1Config) -> dict:
             rd.log_metrics(kind="eval", **m)
             rd.print(f"[eval {tag}] " + " ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}"
                                                  for k, v in m.items()))
-            if m["fid"] < best_fid:
+            if track_best and m["fid"] < best_fid:
                 best_fid = m["fid"]
                 torch.save({"G_ema": G_ema.state_dict(), "config": dataclasses.asdict(cfg), "metrics": m,
                             "num_classes": num_classes}, rd.path / "ckpt" / "best_G_ema.pt")
@@ -314,6 +320,37 @@ def run(cfg: Task1Config) -> dict:
             opt_G.step()
             return d_stats, g_stats
 
+        def finalize_best() -> dict | None:
+            """Full evaluation of the best periodic checkpoint; exports G_ema_best.pt and its sample grids."""
+            best_path = rd.path / "ckpt" / "best_G_ema.pt"
+            if not best_path.exists():
+                return None
+            best = torch.load(best_path, map_location="cpu", weights_only=False)
+            current = {k: v.clone() for k, v in G_ema.state_dict().items()}
+            G_ema.load_state_dict(best["G_ema"])
+            m = evaluate(cfg.final_eval_n, "best", track_best=False)
+            m["periodic_fid"] = best["metrics"].get("fid")
+            m.update({k: best["metrics"][k] for k in ("step", "kimg", "hours") if k in best["metrics"]})
+            torch.save({"G_ema": best["G_ema"], "config": dataclasses.asdict(cfg), "num_classes": num_classes,
+                        "label_source": label_source, "metrics": m}, rd.path / "G_ema_best.pt")
+            with torch.no_grad(), autocast(device, cfg.amp):
+                save_grid(G_ema.model(fixed_z, fixed_c).float(), rd.path / "samples" / "best.png")
+                if num_classes:
+                    cls = torch.randperm(num_classes, device=device)[:16].repeat_interleave(8)
+                    z = torch.randn(len(cls), cfg.G.z_dim, device=device)
+                    save_grid(G_ema.model(z, cls).float(), rd.path / "samples" / "best_per_class.png", nrow=8)
+            G_ema.load_state_dict(current)
+            return m
+
+        if cfg.eval_best:
+            clock = TrainClock(elapsed)
+            m = finalize_best()
+            if m is None:
+                raise FileNotFoundError(f"no ckpt/best_G_ema.pt in {rd.path}")
+            rd.write_json("best_metrics.json", m)
+            rd.print("best checkpoint evaluated: G_ema_best.pt, samples/best.png, best_metrics.json")
+            return m
+
         budget = cfg.hours * 3600
         clock = TrainClock(elapsed)
         sample_timer, eval_timer, ckpt_timer = Every(cfg.sample_minutes * 60), Every(cfg.eval_minutes * 60), \
@@ -328,7 +365,7 @@ def run(cfg: Task1Config) -> dict:
                 break
             lr = cosine_interp(*cfg.lr, progress)
             beta2 = cosine_interp(*cfg.beta2, progress)
-            slot.gamma = log_cosine_interp(*cfg.gamma, progress)
+            slot.gamma = max(log_cosine_interp(*cfg.gamma, progress), gamma_hold)
             critic.p = cosine_interp(*cfg.aug_p, progress)
             for opt in (opt_G, opt_D):
                 set_optimizer_hparams(opt, lr=lr, beta2=beta2)
@@ -361,6 +398,15 @@ def run(cfg: Task1Config) -> dict:
                         raise FloatingPointError("training diverged (non-finite losses); resume from last checkpoint")
                 else:
                     nonfinite_streak = 0
+                # divergence guard: D running away from G (gap exploding) => raise the R1/R2 floor
+                gap = stats.get("img/gap")
+                if gap is not None and math.isfinite(gap):
+                    gap_ema = gap if gap_ema is None else 0.7 * gap_ema + 0.3 * gap
+                    if gap_ema > cfg.gap_limit and gamma_hold < cfg.gamma[0]:
+                        gamma_hold = min(cfg.gamma[0], slot.gamma * cfg.gamma_backoff)
+                        rd.print(f"step {step}: D gap {gap_ema:.2f} > {cfg.gap_limit} -> gamma floor {gamma_hold:.3g}")
+                        gap_ema = None
+                stats["gamma_hold"] = gamma_hold
                 rd.log_metrics(kind="train", step=step, kimg=nimg / 1000, hours=clock.now() / 3600, **stats)
                 rd.write_status(step=step, kimg=nimg / 1000, hours=clock.now() / 3600, budget_hours=cfg.hours,
                                 progress=progress, best_fid=best_fid, **stats)
@@ -389,7 +435,7 @@ def run(cfg: Task1Config) -> dict:
         # ---- final evaluation ----
         n_final = cfg.final_eval_n
         final = evaluate(n_final, "final")
-        best = torch.load(rd.path / "ckpt" / "best_G_ema.pt", map_location="cpu", weights_only=False)
+        best_m = finalize_best()
         torch.save({"G_ema": G_ema.state_dict(), "config": dataclasses.asdict(cfg), "num_classes": num_classes,
                     "label_source": label_source}, rd.path / "G_ema_final.pt")
         with torch.no_grad(), autocast(device, cfg.amp):
@@ -401,7 +447,7 @@ def run(cfg: Task1Config) -> dict:
             z = torch.randn(len(cls), cfg.G.z_dim, device=device)
             with torch.no_grad(), autocast(device, cfg.amp):
                 save_grid(G_ema.model(z, cls).float(), rd.path / "samples" / "final_per_class.png", nrow=8)
-        summary = {"final": final, "best_fid_periodic": best["metrics"].get("fid"), "steps": step,
+        summary = {"final": final, "best": best_m, "steps": step,
                    "budget_hours": cfg.hours,
                    "kimg": nimg / 1000, "hours": clock.now() / 3600, "num_classes": num_classes,
                    "label_source": label_source, "dataset": cfg.dataset, "G_params_M": count_params(G) / 1e6,
@@ -410,8 +456,12 @@ def run(cfg: Task1Config) -> dict:
         (rd.path / "report.md").write_text(summarize_metrics_md(
             "Task 1 - GAN 64x64 final metrics", {**{k: v for k, v in final.items() if not isinstance(v, str)},
                                                  "steps": step, "kimg": nimg / 1000, "dataset": cfg.dataset,
-                                                 "labels": label_source},
-            ["Samples: samples/final.png, samples/final_per_class.png; weights: G_ema_final.pt"]))
+                                                 "labels": label_source,
+                                                 **({f"best_{k}": v for k, v in best_m.items()
+                                                     if not isinstance(v, str)} if best_m else {})},
+            ["Final model: samples/final.png, samples/final_per_class.png; weights: G_ema_final.pt",
+             "Best periodic checkpoint (re-evaluated on the final sample count): samples/best.png, "
+             "samples/best_per_class.png; weights: G_ema_best.pt"]))
         rd.mark_done(summary)
         rd.print("DONE")
         return summary
@@ -431,6 +481,8 @@ def main(argv=None):
     ap.add_argument("--device", default=None)
     ap.add_argument("--smoke", action="store_true", help="tiny models, few steps (code-path test)")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--eval_best", action="store_true",
+                    help="no training: evaluate ckpt/best_G_ema.pt of RUN_DIR on the final sample count")
     ap.add_argument("--override", default=None, help='JSON, e.g. \'{"G": {"expansion": 4}, "gamma": [1, 0.1]}\'')
     args = ap.parse_args(argv)
     cfg = Task1Config()
@@ -442,6 +494,7 @@ def main(argv=None):
         if v is not None:
             setattr(cfg, k, v)
     cfg.force = args.force
+    cfg.eval_best = args.eval_best
     apply_overrides(cfg, parse_override(args.override))
     if args.smoke:  # smoke tests always start from scratch
         fresh_smoke_run(cfg.run_dir)

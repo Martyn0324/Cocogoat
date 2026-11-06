@@ -107,17 +107,29 @@ display(Markdown(open('/content/drive/MyDrive/Cocogoat/runs/probe/report.md').re
 !python -m cocogoat.tasks.task1_gan64 --smoke --dataset genshin --run_dir /content/drive/MyDrive/Cocogoat/runs/task1_smoke --force""",
             """# 5) Settings - edit freely. HOURS = training time budget (evaluation/data time not included).
 #    Raising HOURS later on the same RUN_DIR continues training from the last checkpoint.
+#    The first 3.5 h run (runs/task1) diverged after ~2.4 h; the fixed recipe (gamma floor 1.0, divergence guard,
+#    evaluation every 20 min) should start in a NEW folder, otherwise it would resume from the diverged weights.
 HOURS = 3.5
-RUN_DIR = '/content/drive/MyDrive/Cocogoat/runs/task1'""",
-            """# 6) Training (resumes automatically after a disconnect)
+RUN_DIR = '/content/drive/MyDrive/Cocogoat/runs/task1_v2'""",
+            """# 6) Training (resumes automatically after a disconnect). At the end both the final model and the best
+#    checkpoint seen during training are evaluated on 50k samples (G_ema_final.pt / G_ema_best.pt).
 !python -m cocogoat.tasks.task1_gan64 --dataset genshin --hours {HOURS} --run_dir {RUN_DIR}""",
+            """# 6b) Optional, no training: evaluate the best checkpoint of an OLD run on 50k samples
+#     (writes G_ema_best.pt, samples/best.png, samples/best_per_class.png and best_metrics.json there).
+OLD_RUN = '/content/drive/MyDrive/Cocogoat/runs/task1'
+EVAL_OLD_BEST = False
+if EVAL_OLD_BEST:
+    !python -m cocogoat.tasks.task1_gan64 --dataset genshin --eval_best --run_dir {OLD_RUN}""",
             """# 7) Results
 import json
 from IPython.display import Image, Markdown, display
 run = RUN_DIR
 display(Markdown(open(f'{run}/report.md').read()))
-display(Image(f'{run}/samples/final.png'))
-display(Image(f'{run}/samples/final_per_class.png'))""",
+for name in ['final.png', 'final_per_class.png', 'best.png', 'best_per_class.png']:
+    try:
+        display(Markdown(f'**{name}**'), Image(f'{run}/samples/{name}'))
+    except FileNotFoundError:
+        pass""",
         ],
     ),
 
